@@ -3,7 +3,7 @@
 //! Provides in-game and control-socket commands to record network packet streams
 //! into standard `.mcpr` containers and drive timeline-based replay playback.
 
-use super::Game;
+use super::{Game, Screen};
 use horizon_client::{
     Result,
     studio::{Metadata, ReplayDriver},
@@ -552,6 +552,11 @@ impl Game<'_> {
     }
 
     pub(super) fn open_studio_replay(&mut self, path: &str) -> Result<Value> {
+        if self.remote.is_none()
+            && let Err(e) = self.init_remote_for_replay()
+        {
+            log::warn!("Failed to init remote for replay: {e}");
+        }
         match ReplayDriver::open(Path::new(path)) {
             Ok(driver) => {
                 let duration_ms = driver.duration_ms();
@@ -560,13 +565,32 @@ impl Game<'_> {
                 self.studio_timeline.current_time_ms = 0;
                 self.studio_timeline.visible = true;
                 self.studio_replay = Some(driver);
+                self.title = None;
+                self.screen = Screen::Playing;
+                if let Some(player) = &self.player {
+                    let eye = glam::DVec3::new(
+                        player.position.x,
+                        player.position.y + 1.62,
+                        player.position.z,
+                    );
+                    self.studio_freecam
+                        .activate(eye, self.yaw, self.pitch, self.settings.fov);
+                } else {
+                    self.studio_freecam.active = true;
+                }
+                self.capture(false);
+                self.dragging = false;
+                log::info!("Studio: Opened replay '{path}' ({duration_ms} ms, {packets} packets)");
                 Ok(json!({
                     "ok": true,
                     "duration_ms": duration_ms,
                     "packet_count": packets,
                 }))
             }
-            Err(e) => Ok(json!({ "ok": false, "error": e.to_string() })),
+            Err(e) => {
+                log::error!("Failed to open studio replay '{path}': {e}");
+                Ok(json!({ "ok": false, "error": e.to_string() }))
+            }
         }
     }
 }
