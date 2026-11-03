@@ -3059,6 +3059,14 @@ struct Game<'a> {
     remote: Option<remote::Remote>,
     /// Active packet replay session (game/studio.rs).
     pub(super) studio_replay: Option<horizon_client::studio::ReplayDriver>,
+    /// Studio decoupled spectator freecam (game/studio.rs).
+    pub(super) studio_freecam: horizon_client::studio::StudioFreecam,
+    /// Studio timeline HUD sequencer overlay.
+    pub(super) studio_timeline: horizon_client::studio::TimelineUi,
+    /// Studio visuals and cinematic overrides sidebar.
+    pub(super) studio_visuals: horizon_client::studio::VisualsUi,
+    /// Studio video export dialog.
+    pub(super) studio_export: horizon_client::studio::ExportUi,
     last_replay_tick: Option<Instant>,
     /// This world is open to the network (game/lan.rs).
     lan: Option<lan::LanHost>,
@@ -9077,6 +9085,32 @@ impl Game<'_> {
             self.remote_hud(&mut batch);
             self.draw_sign_editor(&mut batch);
             self.draw_book(&mut batch);
+        }
+        if self.studio_freecam.active || self.studio_replay.is_some() {
+            // 1. Framing guides (Rule of Thirds, Center Crosshair, Aspect Ratio matte)
+            self.studio_visuals
+                .render_guides(&mut batch, &self.gui.atlas);
+
+            // 2. Timeline HUD overlay at bottom
+            self.studio_timeline.render(
+                &mut batch,
+                &self.gui.atlas,
+                self.cursor,
+                &self.studio_freecam,
+            );
+
+            // 3. Visuals & Overrides sidebar on right
+            let bottom_offset = if self.studio_timeline.visible {
+                self.studio_timeline.height()
+            } else {
+                0.0
+            };
+            self.studio_visuals
+                .render(&mut batch, &self.gui.atlas, self.cursor, bottom_offset);
+
+            // 4. Export Dialog modal
+            self.studio_export
+                .render(&mut batch, &self.gui.atlas, self.cursor);
         }
         batch
     }
@@ -16125,7 +16159,17 @@ impl Game<'_> {
         // FishingHookRenderer's line, then DebugRenderer: chunk borders and
         // hitboxes (F3+G, F3+B).
         let mut lines = self.fishing_line(alpha, size);
-        let g = self.debug_gizmos(alpha as f32, camera.to_array());
+        let mut g = self.debug_gizmos(alpha as f32, camera.to_array());
+        if (self.studio_freecam.active || self.studio_replay.is_some())
+            && self.studio_visuals.settings.camera_path_3d
+        {
+            horizon_client::studio::render_camera_path(
+                &self.studio_freecam.track,
+                &mut g,
+                self.studio_timeline.selected_keyframe,
+                50,
+            );
+        }
         lines.extend(g.lines);
         let on_top = g.on_top;
         let colored_lights = if self.title.is_none() {
@@ -18048,6 +18092,22 @@ impl Game<'_> {
                         let b = HudBatch::new([r.config.width, r.config.height]);
                         let previous = self.cursor;
                         self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
+                        if (self.studio_freecam.active || self.studio_replay.is_some())
+                            && (self.studio_timeline.dragging_playhead
+                                || self.studio_timeline.dragging_keyframe.is_some())
+                        {
+                            let action = self.studio_timeline.handle_mouse_drag(
+                                self.cursor,
+                                b.width,
+                                &mut self.studio_freecam,
+                            );
+                            if let horizon_client::studio::TimelineAction::Seek(time_ms) = action
+                                && let Some(r) = &mut self.studio_replay
+                            {
+                                let _ = r.seek(time_ms.min(u32::MAX as u64) as u32);
+                            }
+                            return Ok(());
+                        }
                         if self.screen_mouse_dragged(previous) {
                             return Ok(());
                         }
@@ -18106,6 +18166,9 @@ impl Game<'_> {
                         }) * wheel_sensitivity
                     };
                     let d = scaled(raw_y) as f32;
+                    if self.studio_freecam.active {
+                        self.studio_freecam.adjust_speed(d.round() as i32);
+                    }
                     // ScreenEvent.MouseScrolled.Pre: the open screen hears of
                     // the wheel before anything scrolls, and a cancelled turn
                     // scrolls nothing — no bundle, no list, slider or
@@ -18359,6 +18422,178 @@ impl Game<'_> {
                 }
                 WindowEvent::MouseInput { state, button, .. } => {
                     let pressed = state == ElementState::Pressed;
+                    if !pressed {
+                        self.studio_timeline.handle_mouse_up();
+                    }
+                    if pressed
+                        && button == MouseButton::Left
+                        && (self.studio_freecam.active || self.studio_replay.is_some())
+                    {
+                        let size = self
+                            .renderer
+                            .as_ref()
+                            .map(|r| [r.config.width, r.config.height])
+                            .unwrap_or([1, 1]);
+                        let b = HudBatch::new(size);
+
+                        // 1. Export Dialog modal check
+                        if self.studio_export.open
+                            && self
+                                .studio_export
+                                .handle_mouse_click(self.cursor, b.width, b.height)
+                        {
+                            return Ok(());
+                        }
+
+                        // 2. Visuals sidebar check
+                        if self.studio_visuals.open {
+                            let bottom_offset = if self.studio_timeline.visible {
+                                self.studio_timeline.height()
+                            } else {
+                                0.0
+                            };
+                            if self.studio_visuals.handle_mouse_click(
+                                self.cursor,
+                                b.width,
+                                b.height,
+                                bottom_offset,
+                            ) {
+                                return Ok(());
+                            }
+                        }
+
+                        // 3. Timeline HUD check
+                        if self.studio_timeline.visible {
+                            let action = self.studio_timeline.handle_mouse_down(
+                                self.cursor,
+                                b.width,
+                                b.height,
+                                &self.studio_freecam,
+                            );
+                            match action {
+                                horizon_client::studio::TimelineAction::Seek(time_ms) => {
+                                    if let Some(r) = &mut self.studio_replay {
+                                        let _ = r.seek(time_ms.min(u32::MAX as u64) as u32);
+                                    }
+                                    if self.studio_freecam.locked_to_path {
+                                        self.studio_freecam.update_spline_playback(
+                                            time_ms.min(u32::MAX as u64) as u32,
+                                        );
+                                    }
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::TogglePlay => {
+                                    self.studio_timeline.playing = !self.studio_timeline.playing;
+                                    if let Some(r) = &mut self.studio_replay {
+                                        r.set_paused(!self.studio_timeline.playing);
+                                    }
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::StepBack => {
+                                    let t =
+                                        self.studio_timeline.current_time_ms.saturating_sub(1000);
+                                    self.studio_timeline.current_time_ms = t;
+                                    if let Some(r) = &mut self.studio_replay {
+                                        let _ = r.seek(t.min(u32::MAX as u64) as u32);
+                                    }
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::StepForward => {
+                                    let t = (self.studio_timeline.current_time_ms + 1000)
+                                        .min(self.studio_timeline.duration_ms);
+                                    self.studio_timeline.current_time_ms = t;
+                                    if let Some(r) = &mut self.studio_replay {
+                                        let _ = r.seek(t.min(u32::MAX as u64) as u32);
+                                    }
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::SeekStart => {
+                                    self.studio_timeline.current_time_ms = 0;
+                                    if let Some(r) = &mut self.studio_replay {
+                                        let _ = r.seek(0);
+                                    }
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::SeekEnd => {
+                                    let t = self.studio_timeline.duration_ms;
+                                    self.studio_timeline.current_time_ms = t;
+                                    if let Some(r) = &mut self.studio_replay {
+                                        let _ = r.seek(t.min(u32::MAX as u64) as u32);
+                                    }
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::SetSpeed(speed) => {
+                                    self.studio_timeline.speed = speed;
+                                    if let Some(r) = &mut self.studio_replay {
+                                        r.set_speed(speed);
+                                    }
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::ToggleFreecam => {
+                                    let active = !self.studio_freecam.active;
+                                    if active {
+                                        let (pos, yaw, pitch) = self.camera_view(0.0).unwrap_or((
+                                            glam::DVec3::ZERO,
+                                            0.0,
+                                            0.0,
+                                        ));
+                                        self.studio_freecam.activate(
+                                            pos,
+                                            yaw,
+                                            pitch,
+                                            self.settings.fov,
+                                        );
+                                    } else {
+                                        self.studio_freecam.deactivate();
+                                    }
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::AddCameraKeyframe => {
+                                    let time_ms =
+                                        self.studio_timeline.current_time_ms.min(u32::MAX as u64)
+                                            as u32;
+                                    let kf = horizon_client::studio::CameraKeyframe::new(
+                                        time_ms,
+                                        [
+                                            self.studio_freecam.position.x,
+                                            self.studio_freecam.position.y,
+                                            self.studio_freecam.position.z,
+                                        ],
+                                        self.studio_freecam.yaw,
+                                        self.studio_freecam.pitch,
+                                        self.studio_freecam.fov,
+                                    );
+                                    self.studio_freecam.track.insert(kf);
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::RemoveCameraKeyframe(
+                                    idx,
+                                ) => {
+                                    if idx < self.studio_freecam.track.keyframes.len() {
+                                        self.studio_freecam.track.keyframes.remove(idx);
+                                    }
+                                    self.studio_timeline.selected_keyframe = None;
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::SelectKeyframe(idx) => {
+                                    self.studio_timeline.selected_keyframe = Some(idx);
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::OpenExportDialog => {
+                                    self.studio_export.open = true;
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::ToggleVisualsSidebar => {
+                                    self.studio_visuals.open = !self.studio_visuals.open;
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::None => {}
+                            }
+                            if self.cursor.1 >= b.height - self.studio_timeline.height() {
+                                return Ok(());
+                            }
+                        }
+                    }
                     if matches!(self.screen, Screen::Inventory | Screen::Creative)
                         && let Some(key) = self
                             .settings
@@ -18830,6 +19065,23 @@ impl Game<'_> {
                                 f64::from(pitch * secs / 0.15),
                             );
                         }
+                    }
+                    if self.studio_freecam.active
+                        && self.screen == Screen::Playing
+                        && self.title.is_none()
+                        && !self.dialog_open()
+                    {
+                        let held = |k| self.keys.contains(&k);
+                        let forward = f64::from(u8::from(held(KeyCode::KeyW)))
+                            - f64::from(u8::from(held(KeyCode::KeyS)));
+                        let strafe = f64::from(u8::from(held(KeyCode::KeyD)))
+                            - f64::from(u8::from(held(KeyCode::KeyA)));
+                        let vertical = f64::from(u8::from(held(KeyCode::Space)))
+                            - f64::from(u8::from(held(KeyCode::ShiftLeft)));
+                        let fast_boost = held(KeyCode::ControlLeft);
+                        let secs = elapsed.as_secs_f64().min(0.1);
+                        self.studio_freecam
+                            .update_flight_motion(forward, strafe, vertical, fast_boost, secs);
                     }
                     if self.title.is_none() {
                         horizon_client::spans::time("update_world", || self.update_world());
@@ -19635,6 +19887,10 @@ impl<'a> Game<'a> {
             entity_attachments: Default::default(),
             remote: None,
             studio_replay: None,
+            studio_freecam: Default::default(),
+            studio_timeline: Default::default(),
+            studio_visuals: Default::default(),
+            studio_export: Default::default(),
             last_replay_tick: None,
             lan: None,
             integrated: None,

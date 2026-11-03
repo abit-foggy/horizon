@@ -26,6 +26,11 @@ pub const HELP: &[&str] = &[
     "studio replay seek MS          seek replay playback to timestamp in milliseconds",
     "studio replay status           query replay playback status",
     "studio replay close            close active replay session",
+    "studio freecam [on|off]        toggle or set 6-DOF spectator freecam flight",
+    "studio keyframe add|remove|list add or modify camera spline keyframes",
+    "studio timeline [show|hide]    toggle studio timeline HUD overlay",
+    "studio visuals                 toggle visuals & cinematic overrides sidebar",
+    "studio export                  open offline video export dialog",
 ];
 
 impl Game<'_> {
@@ -222,9 +227,112 @@ impl Game<'_> {
                     ));
                 }
             },
+            "freecam" => {
+                let active = match words.get(1).copied() {
+                    Some("on") => true,
+                    Some("off") => false,
+                    _ => !self.studio_freecam.active,
+                };
+                if active {
+                    let (pos, yaw, pitch) =
+                        self.camera_view(0.0)
+                            .unwrap_or((glam::DVec3::ZERO, 0.0, 0.0));
+                    self.studio_freecam
+                        .activate(pos, yaw, pitch, self.settings.fov);
+                    self.capture(true);
+                    self.system_message(Text::literal(
+                        "Studio Freecam: Activated (WASD fly, Space/Shift vertical, Ctrl boost, Mouse wheel speed)",
+                    ));
+                } else {
+                    self.studio_freecam.deactivate();
+                    self.system_message(Text::literal("Studio Freecam: Deactivated"));
+                }
+            }
+            "keyframe" => match words.get(1).copied() {
+                Some("add") => {
+                    let time_ms = self.studio_timeline.current_time_ms.min(u32::MAX as u64) as u32;
+                    let kf = horizon_client::studio::CameraKeyframe::new(
+                        time_ms,
+                        [
+                            self.studio_freecam.position.x,
+                            self.studio_freecam.position.y,
+                            self.studio_freecam.position.z,
+                        ],
+                        self.studio_freecam.yaw,
+                        self.studio_freecam.pitch,
+                        self.studio_freecam.fov,
+                    );
+                    self.studio_freecam.track.insert(kf);
+                    self.system_message(Text::literal(format!(
+                        "Studio: Added camera keyframe at {}ms (total: {})",
+                        time_ms,
+                        self.studio_freecam.track.keyframes.len()
+                    )));
+                }
+                Some("clear") => {
+                    self.studio_freecam.track.clear();
+                    self.studio_timeline.selected_keyframe = None;
+                    self.system_message(Text::literal("Studio: Cleared all keyframes"));
+                }
+                Some("list") => {
+                    let count = self.studio_freecam.track.keyframes.len();
+                    self.system_message(Text::literal(format!("Studio Keyframes ({}):", count)));
+                    let lines: Vec<String> = self
+                        .studio_freecam
+                        .track
+                        .keyframes
+                        .iter()
+                        .enumerate()
+                        .map(|(i, k)| {
+                            format!(
+                                "  #{i} @ {}ms: pos=({:.1}, {:.1}, {:.1}), yaw={:.1}, pitch={:.1}",
+                                k.time_ms,
+                                k.position[0],
+                                k.position[1],
+                                k.position[2],
+                                k.yaw,
+                                k.pitch
+                            )
+                        })
+                        .collect();
+                    for line in lines {
+                        self.system_message(Text::literal(line));
+                    }
+                }
+                _ => {
+                    self.system_message(Text::literal("Usage: /studio keyframe <add|clear|list>"));
+                }
+            },
+            "timeline" | "ui" => {
+                let vis = match words.get(1).copied() {
+                    Some("show") => true,
+                    Some("hide") => false,
+                    _ => !self.studio_timeline.visible,
+                };
+                self.studio_timeline.visible = vis;
+                self.system_message(Text::literal(format!(
+                    "Studio Timeline: {}",
+                    if vis { "Visible" } else { "Hidden" }
+                )));
+            }
+            "visuals" => {
+                self.studio_visuals.open = !self.studio_visuals.open;
+                self.system_message(Text::literal(format!(
+                    "Studio Visuals sidebar: {}",
+                    if self.studio_visuals.open {
+                        "Open"
+                    } else {
+                        "Closed"
+                    }
+                )));
+            }
+            "export" => {
+                self.studio_export.open = true;
+                self.system_message(Text::literal("Studio: Opened video export dialog"));
+            }
             _ => {
                 self.system_message(Text::literal(
-                    "Unknown studio subcommand. Usage: /studio <record|replay> ...",
+                    "Unknown studio subcommand. Usage: /studio <record|replay|freecam|keyframe|timeline|visuals|export> ...",
                 ));
             }
         }
@@ -233,11 +341,6 @@ impl Game<'_> {
 
     /// Advance active replay playback by elapsed frame time and dispatch ready packets.
     pub(super) fn advance_studio_replay(&mut self) -> Result<()> {
-        let Some(driver) = self.studio_replay.as_mut() else {
-            self.last_replay_tick = None;
-            return Ok(());
-        };
-
         let now = std::time::Instant::now();
         let delta = match self.last_replay_tick {
             Some(last) => now
@@ -247,12 +350,24 @@ impl Game<'_> {
         };
         self.last_replay_tick = Some(now);
 
-        let ready_packets = match driver.advance(delta) {
-            Ok(pkts) => pkts,
-            Err(e) => {
-                log::warn!("Studio replay advance error: {e}");
+        let (ready_packets, pos, dur, paused) = {
+            let Some(driver) = self.studio_replay.as_mut() else {
+                self.last_replay_tick = None;
                 return Ok(());
-            }
+            };
+            let pkts = match driver.advance(delta) {
+                Ok(pkts) => pkts,
+                Err(e) => {
+                    log::warn!("Studio replay advance error: {e}");
+                    return Ok(());
+                }
+            };
+            (
+                pkts,
+                driver.position_ms(),
+                driver.duration_ms(),
+                driver.is_paused(),
+            )
         };
 
         for pkt in ready_packets {
@@ -273,6 +388,13 @@ impl Game<'_> {
                     );
                 }
             }
+        }
+
+        self.studio_timeline.current_time_ms = pos as u64;
+        self.studio_timeline.duration_ms = dur as u64;
+        self.studio_timeline.playing = !paused;
+        if self.studio_freecam.locked_to_path {
+            self.studio_freecam.update_spline_playback(pos);
         }
         Ok(())
     }
@@ -434,6 +556,9 @@ impl Game<'_> {
             Ok(driver) => {
                 let duration_ms = driver.duration_ms();
                 let packets = driver.packet_count();
+                self.studio_timeline.duration_ms = duration_ms as u64;
+                self.studio_timeline.current_time_ms = 0;
+                self.studio_timeline.visible = true;
                 self.studio_replay = Some(driver);
                 Ok(json!({
                     "ok": true,

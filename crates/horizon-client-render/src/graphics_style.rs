@@ -49,11 +49,11 @@ const fn hex(c: u32, a: u8) -> u32 {
     (a as u32) << 24 | (c & 0xff) << 16 | (c >> 8 & 0xff) << 8 | (c >> 16 & 0xff)
 }
 /// The plate and the strip: the page's dark, see-through, so the world shows behind them.
-const GLASS: u32 = hex(B.page, 118);
+pub const GLASS: u32 = hex(B.page, 118);
 /// Their 1 px edge.
-const EDGE: u32 = hex(B.ink, 26);
+pub const EDGE: u32 = hex(B.ink, 26);
 /// A group's panel, a little lighter than the plate it sits on.
-const GROUP: u32 = hex(B.ink, 11);
+pub const GROUP: u32 = hex(B.ink, 11);
 /// A hovered or focused row, lit on its group's panel.
 pub const HOVER: u32 = hex(B.ink, 18);
 /// The open page in the page list.
@@ -62,15 +62,15 @@ pub const OPEN: u32 = hex(B.ink, 26);
 pub const HEAD_RULE: u32 = hex(B.ink, 31);
 pub const ROW_RULE: u32 = hex(B.ink, 15);
 /// Fields, boxes and the value stepper: sunk, see-through.
-const WELL: u32 = hex(B.outline, 102);
+pub const WELL: u32 = hex(B.outline, 102);
 /// A button, a slider's track, the scroller's thumb.
-const BUTTON: u32 = hex(B.ink, 20);
-const BUTTON_HOVER: u32 = hex(B.ink, 41);
-const TRACK: u32 = hex(B.ink, 64);
-const HANDLE: u32 = hex(B.ink, 255);
+pub const BUTTON: u32 = hex(B.ink, 20);
+pub const BUTTON_HOVER: u32 = hex(B.ink, 41);
+pub const TRACK: u32 = hex(B.ink, 64);
+pub const HANDLE: u32 = hex(B.ink, 255);
 /// The one main button.
-const FACE: u32 = hex(B.face, 255);
-const FACE_HOVER: u32 = hex(0x6a50e6, 255);
+pub const FACE: u32 = hex(B.face, 255);
+pub const FACE_HOVER: u32 = hex(0x6a50e6, 255);
 /// A tick box's edge when off.
 const BOX_EDGE: u32 = hex(B.ink_soft, 89);
 const OUTLINE: u32 = hex(B.outline, 255);
