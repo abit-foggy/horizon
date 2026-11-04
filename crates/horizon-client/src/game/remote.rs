@@ -6423,7 +6423,7 @@ impl Game<'_> {
             return Ok(());
         };
         player.fluids.boat = boat;
-        if !riding {
+        if !riding && self.studio_replay.is_none() {
             self.previous_position = player.position;
         }
         let before = (
@@ -6619,7 +6619,9 @@ impl Game<'_> {
             self.snap_player_model_pitch();
         }
         // The player's own model (third person, the inventory's preview).
-        self.tick_player_model();
+        if self.studio_replay.is_none() {
+            self.tick_player_model();
+        }
         if !dead {
             self.remote_tick_using();
         }
