@@ -19198,6 +19198,111 @@ impl Game<'_> {
                         return Ok(());
                     };
                     self.native_key_event(key, event.state == ElementState::Pressed, event.repeat);
+
+                    // Studio mode top bar shortcuts
+                    if (self.studio_freecam.active || self.studio_replay.is_some())
+                        && self.screen == Screen::Playing
+                        && self.title.is_none()
+                        && !self.dialog_open()
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        // 1. Ctrl+E: Export Video
+                        if (self.modifiers.control_key() || self.modifiers.super_key())
+                            && key == KeyCode::KeyE
+                        {
+                            self.studio_export.open = true;
+                            return Ok(());
+                        }
+
+                        // 2. P: Pause Menu
+                        if key == KeyCode::KeyP {
+                            self.pause_menu = true;
+                            self.capture(false);
+                            return Ok(());
+                        }
+
+                        // 3. Home: Reset Camera to Player
+                        if key == KeyCode::Home {
+                            let (pos, yaw, pitch) = if let Some(p) = &self.player {
+                                (
+                                    glam::DVec3::new(p.position.x, p.position.y + 1.62, p.position.z),
+                                    self.yaw,
+                                    self.pitch,
+                                )
+                            } else {
+                                (glam::DVec3::ZERO, 0.0, 0.0)
+                            };
+                            self.studio_freecam.activate(pos, yaw, pitch, self.settings.fov);
+                            return Ok(());
+                        }
+
+                        // 4. L: Lock / Unlock Camera to Spline Path
+                        if key == KeyCode::KeyL {
+                            self.studio_freecam.locked_to_path = !self.studio_freecam.locked_to_path;
+                            return Ok(());
+                        }
+
+                        // 5. K: Add Keyframe
+                        if key == KeyCode::KeyK {
+                            let time_ms = self.studio_timeline.current_time_ms.min(u32::MAX as u64) as u32;
+                            let kf = horizon_client::studio::CameraKeyframe::new(
+                                time_ms,
+                                [
+                                    self.studio_freecam.position.x,
+                                    self.studio_freecam.position.y,
+                                    self.studio_freecam.position.z,
+                                ],
+                                self.studio_freecam.yaw,
+                                self.studio_freecam.pitch,
+                                self.studio_freecam.fov,
+                            );
+                            self.studio_freecam.track.insert(kf);
+                            return Ok(());
+                        }
+
+                        // 6. G: Cycle Framing Guides
+                        if key == KeyCode::KeyG {
+                            let (g3, gc) = (
+                                self.studio_visuals.settings.guide_rule_of_thirds,
+                                self.studio_visuals.settings.guide_center,
+                            );
+                            if !g3 && !gc {
+                                self.studio_visuals.settings.guide_rule_of_thirds = true;
+                                self.studio_visuals.settings.guide_center = false;
+                            } else if g3 && !gc {
+                                self.studio_visuals.settings.guide_rule_of_thirds = false;
+                                self.studio_visuals.settings.guide_center = true;
+                            } else if !g3 && gc {
+                                self.studio_visuals.settings.guide_rule_of_thirds = true;
+                                self.studio_visuals.settings.guide_center = true;
+                            } else {
+                                self.studio_visuals.settings.guide_rule_of_thirds = false;
+                                self.studio_visuals.settings.guide_center = false;
+                            }
+                            return Ok(());
+                        }
+
+                        // 7. Shift+A: Cycle Aspect Ratio Matte (avoids conflicting with 'A' strafe left)
+                        if key == KeyCode::KeyA && self.modifiers.shift_key() {
+                            self.studio_visuals.settings.aspect_ratio =
+                                self.studio_visuals.settings.aspect_ratio.cycle();
+                            return Ok(());
+                        }
+
+                        // 8. V: Toggle Visuals & Overrides Sidebar
+                        if key == KeyCode::KeyV {
+                            self.studio_visuals.open = !self.studio_visuals.open;
+                            return Ok(());
+                        }
+
+                        // 9. T: Toggle Timeline HUD
+                        if key == KeyCode::KeyT && self.studio_replay.is_some() {
+                            self.studio_timeline.visible = !self.studio_timeline.visible;
+                            return Ok(());
+                        }
+                    }
+
                     // Screen.keyPressed sees the physical key, repeats included.
                     if event.state == ElementState::Pressed
                         && self.screen == Screen::Inventory

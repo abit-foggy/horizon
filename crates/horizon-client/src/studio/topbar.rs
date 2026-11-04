@@ -241,7 +241,7 @@ impl TopBarUi {
                 176.0,
                 vec![
                     ("📐 Framing Guides", "G"),
-                    ("⬛ Aspect Ratio Matte", "A"),
+                    ("⬛ Aspect Ratio Matte", "Shift+A"),
                     ("🎛 Visuals Sidebar", "V"),
                     ("⏱ Timeline HUD", "T"),
                 ],
@@ -425,5 +425,44 @@ mod tests {
         // Click Exit Studio button
         let exit_action = topbar.handle_mouse_click((1280.0 - 40.0, 10.0), 1280.0, 720.0);
         assert_eq!(exit_action, TopBarAction::ExitStudio);
+    }
+
+    #[test]
+    fn test_topbar_shortcuts_labels() {
+        let _topbar = TopBarUi::new();
+        let (file_x, file_items) = match TopBarMenu::File {
+            TopBarMenu::File => (
+                80.0,
+                vec![
+                    ("🎬 Export Video...", "Ctrl+E"),
+                    ("📁 Open Recordings Folder", ""),
+                    ("⏸ Game Pause Menu", "P"),
+                    ("✕ Close Replay", "Esc"),
+                ],
+            ),
+            _ => unreachable!(),
+        };
+        assert_eq!(file_x, 80.0);
+        assert_eq!(file_items[0].1, "Ctrl+E");
+        assert_eq!(file_items[2].1, "P");
+        assert_eq!(file_items[3].1, "Esc");
+
+        let (view_x, view_items) = match TopBarMenu::View {
+            TopBarMenu::View => (
+                176.0,
+                vec![
+                    ("📐 Framing Guides", "G"),
+                    ("⬛ Aspect Ratio Matte", "Shift+A"),
+                    ("🎛 Visuals Sidebar", "V"),
+                    ("⏱ Timeline HUD", "T"),
+                ],
+            ),
+            _ => unreachable!(),
+        };
+        assert_eq!(view_x, 176.0);
+        assert_eq!(view_items[0].1, "G");
+        assert_eq!(view_items[1].1, "Shift+A");
+        assert_eq!(view_items[2].1, "V");
+        assert_eq!(view_items[3].1, "T");
     }
 }
