@@ -6081,7 +6081,9 @@ impl Game<'_> {
                 self.apply_remote_abilities();
             }
         }
-        self.previous_position = position;
+        if self.studio_replay.is_none() {
+            self.previous_position = position;
+        }
         self.yaw = yaw;
         self.pitch = pitch;
         if (self.studio_replay.is_some() || self.studio_freecam.active)
@@ -7458,6 +7460,7 @@ impl Game<'_> {
                 data: 0,
             }));
         }
+        let mut moved_or_rotated = false;
         if riding {
             // LocalPlayer.tick: a passenger sends its look, then the vehicle
             // it controls.
@@ -7467,6 +7470,7 @@ impl Game<'_> {
                 flags: u8::from(on_ground) | u8::from(collision) << 1,
             }));
             out.extend(vehicle);
+            moved_or_rotated = true;
         } else if controls_camera
             // LocalPlayer.sendPosition: no move while the view is another
             // entity's (the server keeps the player on it).
@@ -7475,6 +7479,24 @@ impl Game<'_> {
                     .update(pos, (yaw, pitch), on_ground, collision)
         {
             out.push(packet);
+            moved_or_rotated = true;
+        }
+        if moved_or_rotated && r.session.is_recording() {
+            let pkt = horizon_protocol::packets::play::Clientbound::PlayerPosition(
+                horizon_protocol::packets::play::PlayerPosition {
+                    teleport: 0,
+                    position: pos,
+                    delta: [0.0, 0.0, 0.0],
+                    yaw,
+                    pitch,
+                    relatives: 0,
+                },
+            );
+            let encoded = pkt.encode();
+            let mut reader = horizon_protocol::buf::Reader::new(&encoded);
+            if let Ok(id) = reader.varint() {
+                r.session.record_packet(id, reader.rest());
+            }
         }
         // Creative inventory edits are sent slot by slot (SetCreativeModeSlot).
         let mut creative_slots = Vec::new();
