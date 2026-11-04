@@ -3074,6 +3074,7 @@ struct Game<'a> {
     /// Roblox Studio style RMB hold state for camera looking.
     pub(super) studio_rmb_down: bool,
     last_replay_tick: Option<Instant>,
+    pub(super) studio_virtual_tick_ms: f32,
     /// This world is open to the network (game/lan.rs).
     lan: Option<lan::LanHost>,
     /// Single player's server thread, which `remote` is connected to.
@@ -11298,15 +11299,22 @@ impl Game<'_> {
         self.mark_motion(out.len(), 0);
         laps.lap("eg_mobs");
         // In first person only a shader pack's shadow pass draws the player.
-        self.mark_player(out.len(), !self.own_body_in_view());
-        let player_start = out.len();
-        self.player_model_geometry(camera, self.clock.camera_fraction(), &mut out);
-        // A native pack has no per-entity draws to hide it with: its shadow pass alone gets
-        // the first-person model.
-        if self.pack_ids.is_none() && !self.own_body_in_view() {
-            self.shadow_only_vertices
-                .borrow_mut()
-                .extend(out.drain(player_start..));
+        if self.studio_visuals.settings.world_players {
+            self.mark_player(out.len(), !self.own_body_in_view());
+            let player_start = out.len();
+            let player_alpha = if self.studio_replay.is_some() {
+                (self.studio_virtual_tick_ms as f64 / 50.0).clamp(0.0, 1.0)
+            } else {
+                self.clock.camera_fraction()
+            };
+            self.player_model_geometry(camera, player_alpha, &mut out);
+            // A native pack has no per-entity draws to hide it with: its shadow pass alone gets
+            // the first-person model.
+            if self.pack_ids.is_none() && !self.own_body_in_view() {
+                self.shadow_only_vertices
+                    .borrow_mut()
+                    .extend(out.drain(player_start..));
+            }
         }
         self.mark_entity(out.len(), "minecraft:evoker_fangs");
         self.fangs_geometry(camera, alpha, &mut out);
@@ -18169,6 +18177,7 @@ impl Game<'_> {
                                 && let Some(r) = &mut self.studio_replay
                             {
                                 let _ = r.seek(time_ms.min(u32::MAX as u64) as u32);
+                                self.reset_studio_playback_ticks();
                             }
                             return Ok(());
                         }
@@ -18690,6 +18699,7 @@ impl Game<'_> {
                                 horizon_client::studio::TimelineAction::Seek(time_ms) => {
                                     if let Some(r) = &mut self.studio_replay {
                                         let _ = r.seek(time_ms.min(u32::MAX as u64) as u32);
+                                        self.reset_studio_playback_ticks();
                                     }
                                     if self.studio_freecam.locked_to_path {
                                         self.studio_freecam.update_spline_playback(
@@ -18711,6 +18721,7 @@ impl Game<'_> {
                                     self.studio_timeline.current_time_ms = t;
                                     if let Some(r) = &mut self.studio_replay {
                                         let _ = r.seek(t.min(u32::MAX as u64) as u32);
+                                        self.reset_studio_playback_ticks();
                                     }
                                     return Ok(());
                                 }
@@ -18720,6 +18731,7 @@ impl Game<'_> {
                                     self.studio_timeline.current_time_ms = t;
                                     if let Some(r) = &mut self.studio_replay {
                                         let _ = r.seek(t.min(u32::MAX as u64) as u32);
+                                        self.reset_studio_playback_ticks();
                                     }
                                     return Ok(());
                                 }
@@ -18727,6 +18739,7 @@ impl Game<'_> {
                                     self.studio_timeline.current_time_ms = 0;
                                     if let Some(r) = &mut self.studio_replay {
                                         let _ = r.seek(0);
+                                        self.reset_studio_playback_ticks();
                                     }
                                     return Ok(());
                                 }
@@ -18735,6 +18748,7 @@ impl Game<'_> {
                                     self.studio_timeline.current_time_ms = t;
                                     if let Some(r) = &mut self.studio_replay {
                                         let _ = r.seek(t.min(u32::MAX as u64) as u32);
+                                        self.reset_studio_playback_ticks();
                                     }
                                     return Ok(());
                                 }
@@ -20243,6 +20257,7 @@ impl<'a> Game<'a> {
             studio_replay_path: None,
             studio_rmb_down: false,
             last_replay_tick: None,
+            studio_virtual_tick_ms: 0.0,
             lan: None,
             integrated: None,
             level_shapes: Default::default(),
