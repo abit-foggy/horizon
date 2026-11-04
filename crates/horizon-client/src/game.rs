@@ -8519,6 +8519,12 @@ impl Game<'_> {
     /// click. A screen that is open keeps it free, as releasing the pointer
     /// for that screen did: it is the screen, not the focus, that shows it.
     fn regrab_on_refocus(&mut self) {
+        if self.studio_freecam.active || self.studio_replay.is_some() {
+            self.regrab_on_refocus = false;
+            self.studio_rmb_down = false;
+            self.capture(false);
+            return;
+        }
         if std::mem::take(&mut self.regrab_on_refocus) && self.screen == Screen::Playing {
             self.capture(true);
         }
@@ -17735,6 +17741,10 @@ impl Game<'_> {
             self.physical_keys.clear();
             self.physical_buttons.clear();
             self.drag_button = None;
+            if self.studio_freecam.active || self.studio_replay.is_some() {
+                self.studio_rmb_down = false;
+                self.capture(false);
+            }
         }
         if let WindowEvent::ModifiersChanged(m) = &event {
             self.modifiers = m.state();
@@ -18106,33 +18116,39 @@ impl Game<'_> {
                         // system keeps the grab: the window asks for it back
                         // when the focus returns (`regrab_on_refocus`).
                         let held = self.captured;
-                        if self.control.is_none() {
-                            self.keys.clear();
-                            // Latched sneak/sprint live in `toggles`, not in the
-                            // physical keys: put them back so a short alt-tab
-                            // (no pause screen) does not drop them. Only a mapping
-                            // whose toggle option is on is latched; a held one has
-                            // no state to keep, and an unfocused window never gets
-                            // its key release, so leaving it down would keep the
-                            // player sneaking or sprinting until the key is tapped.
-                            for (slot, needs_toggle) in [
-                                self.settings.toggle_crouch,
-                                self.settings.toggle_sprint,
-                                self.settings.toggle_attack,
-                                self.settings.toggle_use,
-                            ]
-                            .into_iter()
-                            .enumerate()
-                            {
-                                self.toggles.0[slot].set_down(false, needs_toggle);
-                            }
-                            self.sync_toggle(0);
-                            self.sync_toggle(1);
-                            self.left = false;
-                            self.right = false;
+                        if self.studio_freecam.active || self.studio_replay.is_some() {
+                            self.studio_rmb_down = false;
                             self.capture(false);
+                            self.regrab_on_refocus = false;
+                        } else {
+                            if self.control.is_none() {
+                                self.keys.clear();
+                                // Latched sneak/sprint live in `toggles`, not in the
+                                // physical keys: put them back so a short alt-tab
+                                // (no pause screen) does not drop them. Only a mapping
+                                // whose toggle option is on is latched; a held one has
+                                // no state to keep, and an unfocused window never gets
+                                // its key release, so leaving it down would keep the
+                                // player sneaking or sprinting until the key is tapped.
+                                for (slot, needs_toggle) in [
+                                    self.settings.toggle_crouch,
+                                    self.settings.toggle_sprint,
+                                    self.settings.toggle_attack,
+                                    self.settings.toggle_use,
+                                ]
+                                .into_iter()
+                                .enumerate()
+                                {
+                                    self.toggles.0[slot].set_down(false, needs_toggle);
+                                }
+                                self.sync_toggle(0);
+                                self.sync_toggle(1);
+                                self.left = false;
+                                self.right = false;
+                                self.capture(false);
+                            }
+                            self.regrab_on_refocus = held;
                         }
-                        self.regrab_on_refocus = held;
                     }
                 }
                 WindowEvent::CursorMoved { position, .. } => {

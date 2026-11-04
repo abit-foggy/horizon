@@ -564,6 +564,9 @@ impl Game<'_> {
                 self.studio_timeline.duration_ms = duration_ms as u64;
                 self.studio_timeline.current_time_ms = 0;
                 self.studio_timeline.visible = true;
+                self.studio_timeline.selected_keyframe = None;
+                self.studio_freecam.track.keyframes.clear();
+                self.studio_freecam.locked_to_path = false;
                 self.studio_replay = Some(driver);
                 self.studio_replay_path = Some(path.to_string());
                 self.title = None;
@@ -606,6 +609,9 @@ impl Game<'_> {
         self.studio_replay = None;
         self.studio_replay_path = None;
         self.studio_freecam.deactivate();
+        self.studio_freecam.track.keyframes.clear();
+        self.studio_freecam.locked_to_path = false;
+        self.studio_timeline.selected_keyframe = None;
         self.studio_topbar.close_dropdown();
         self.studio_timeline.visible = false;
         self.studio_visuals.open = false;
