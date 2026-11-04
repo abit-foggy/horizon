@@ -75,13 +75,16 @@ impl Game<'_> {
     /// name, while that model shows in third person. Vanilla never names the
     /// camera entity (`LivingEntityRenderer.shouldShowName`).
     fn own_name_tag(&self) -> Option<(&Mob, String)> {
-        if !self.settings.extras.own_name_tag
-            || self.camera_type.first_person()
-            || self.sleeping.is_some()
-            || self.spectator()
-            || self.own_invisible()
-        {
-            return None;
+        let in_studio = self.studio_freecam.active || self.studio_replay.is_some();
+        if !in_studio {
+            if !self.settings.extras.own_name_tag
+                || self.camera_type.first_person()
+                || self.sleeping.is_some()
+                || self.spectator()
+                || self.own_invisible()
+            {
+                return None;
+            }
         }
         let m = self.player_model.as_ref()?;
         Some((m, self.own_profile_name()))
@@ -89,6 +92,13 @@ impl Game<'_> {
     /// The local player's profile name as others see it: the session's on a
     /// server (single player's server thread included), else the local player's.
     pub(super) fn own_profile_name(&self) -> String {
+        if let Some(replay) = &self.studio_replay {
+            if let Some(player) = replay.metadata.players.first() {
+                if !player.is_empty() {
+                    return player.clone();
+                }
+            }
+        }
         match self.remote.as_ref() {
             Some(r) if !r.profile_name.is_empty() => r.profile_name.clone(),
             _ => self.acting_player_name().to_owned(),
@@ -124,6 +134,7 @@ impl Game<'_> {
         self.name_tags_with_hooks(camera, alpha, !mod_api::mods().is_empty())
     }
     fn name_tags_with_hooks(&self, camera: glam::DVec3, alpha: f64, hooks: bool) -> Vec<NameTag> {
+        let in_studio = self.studio_freecam.active || self.studio_replay.is_some();
         let target = self.mob_hit().map(|(i, _)| self.mobs[i].id);
         let viewer = self.player_team();
         let mut tags = Vec::new();
@@ -194,7 +205,7 @@ impl Game<'_> {
                 discrete,
                 distance_sqr,
                 invisible_to_viewer: invisible,
-                hud_hidden: self.ui.hide_gui,
+                hud_hidden: if in_studio { false } else { self.ui.hide_gui },
                 is_camera: false,
                 is_vehicle: ridden.contains(&m.id),
             };
@@ -207,7 +218,7 @@ impl Game<'_> {
                 .then(|| m.extra.description.component())
                 .flatten()
                 .map(|tag| horizon_client::entity_nbt::name_text(&tag).resolve_legacy());
-            let name_shown = sb::name_shown(team, viewer, view)
+            let name_shown = (in_studio || sb::name_shown(team, viewer, view))
                 && (player || m.name_visible || Some(m.id) == target)
                 && (player || m.custom_name.is_some());
             let mut visible = name_shown;

@@ -104,7 +104,7 @@ impl Default for VisualsSettings {
             world_players: true,
             world_particles: true,
             world_sky: true,
-            world_nametags: false,
+            world_nametags: true,
 
             override_fog: false,
             fog_distance: 64.0,
