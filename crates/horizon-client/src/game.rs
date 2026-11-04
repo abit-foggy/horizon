@@ -8283,6 +8283,8 @@ impl Game<'_> {
             .is_some_and(|t| t.elapsed() > Duration::from_millis(500))
             && self.control.is_none()
             && self.screen == Screen::Playing
+            && !self.studio_freecam.active
+            && self.studio_replay.is_none()
             && self.player.is_some()
             && !self.options.no_pause
             && self.settings.file.bool("pauseOnLostFocus")
@@ -18846,6 +18848,17 @@ impl Game<'_> {
                     match self.screen {
                         Screen::Playing => {
                             if self.studio_freecam.active || self.studio_replay.is_some() {
+                                if pressed && !self.captured {
+                                    if !self.studio_freecam.active {
+                                        let (pos, yaw, pitch) = self.camera_view(0.0).unwrap_or((
+                                            glam::DVec3::ZERO,
+                                            0.0,
+                                            0.0,
+                                        ));
+                                        self.studio_freecam.activate(pos, yaw, pitch, self.settings.fov);
+                                    }
+                                    self.capture(true);
+                                }
                                 return Ok(());
                             }
                             if pressed && !self.captured {
@@ -19275,6 +19288,24 @@ impl Game<'_> {
                         if key == KeyCode::KeyP {
                             self.pause_menu = true;
                             self.capture(false);
+                            return Ok(());
+                        }
+
+                        // F: Toggle Freecam
+                        if key == KeyCode::KeyF && !self.modifiers.control_key() && !self.modifiers.super_key() {
+                            let active = !self.studio_freecam.active;
+                            if active {
+                                let (pos, yaw, pitch) = self.camera_view(0.0).unwrap_or((
+                                    glam::DVec3::ZERO,
+                                    0.0,
+                                    0.0,
+                                ));
+                                self.studio_freecam.activate(pos, yaw, pitch, self.settings.fov);
+                                self.capture(true);
+                            } else {
+                                self.studio_freecam.deactivate();
+                                self.capture(false);
+                            }
                             return Ok(());
                         }
 
