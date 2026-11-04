@@ -215,11 +215,8 @@ impl Game<'_> {
                     }
                 }
                 Some("close") => {
-                    if self.studio_replay.take().is_some() {
-                        self.system_message(Text::literal("Studio Replay: Closed"));
-                    } else {
-                        self.system_message(Text::literal("Studio Replay: No active replay"));
-                    }
+                    let _ = self.close_studio_replay();
+                    self.system_message(Text::literal("Studio Replay: Closed"));
                 }
                 _ => {
                     self.system_message(Text::literal(
@@ -480,8 +477,8 @@ impl Game<'_> {
                     }
                 }
                 Some("close") => {
-                    let closed = self.studio_replay.take().is_some();
-                    Ok(Some(json!({ "ok": true, "closed": closed })))
+                    let res = self.close_studio_replay()?;
+                    Ok(Some(res))
                 }
                 _ => Ok(Some(json!({ "error": "unknown studio replay subcommand" }))),
             },
@@ -565,8 +562,18 @@ impl Game<'_> {
                 self.studio_timeline.current_time_ms = 0;
                 self.studio_timeline.visible = true;
                 self.studio_replay = Some(driver);
+                self.studio_replay_path = Some(path.to_string());
                 self.title = None;
                 self.screen = Screen::Playing;
+                self.pause_menu = false;
+                self.studio_topbar.close_dropdown();
+                self.studio_rmb_down = false;
+                self.capture(false);
+                self.dragging = false;
+
+                // Advance initial packets so chunks and player position decode immediately on frame 0
+                let _ = self.advance_studio_replay();
+
                 if let Some(player) = &self.player {
                     let eye = glam::DVec3::new(
                         player.position.x,
@@ -578,8 +585,6 @@ impl Game<'_> {
                 } else {
                     self.studio_freecam.active = true;
                 }
-                self.capture(false);
-                self.dragging = false;
                 log::info!("Studio: Opened replay '{path}' ({duration_ms} ms, {packets} packets)");
                 Ok(json!({
                     "ok": true,
@@ -592,5 +597,21 @@ impl Game<'_> {
                 Ok(json!({ "ok": false, "error": e.to_string() }))
             }
         }
+    }
+
+    pub(super) fn close_studio_replay(&mut self) -> Result<Value> {
+        self.studio_replay = None;
+        self.studio_replay_path = None;
+        self.studio_freecam.deactivate();
+        self.studio_topbar.close_dropdown();
+        self.studio_timeline.visible = false;
+        self.studio_visuals.open = false;
+        self.studio_export.open = false;
+        self.studio_rmb_down = false;
+        self.capture(false);
+        if self.integrated.is_none() && self.lan.is_none() {
+            let _ = self.close_world();
+        }
+        Ok(json!({ "ok": true }))
     }
 }

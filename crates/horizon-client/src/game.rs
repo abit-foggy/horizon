@@ -3067,6 +3067,12 @@ struct Game<'a> {
     pub(super) studio_visuals: horizon_client::studio::VisualsUi,
     /// Studio video export dialog.
     pub(super) studio_export: horizon_client::studio::ExportUi,
+    /// Studio macOS-style top menu bar.
+    pub(super) studio_topbar: horizon_client::studio::TopBarUi,
+    /// Replay file path currently opened.
+    pub(super) studio_replay_path: Option<String>,
+    /// Roblox Studio style RMB hold state for camera looking.
+    pub(super) studio_rmb_down: bool,
     last_replay_tick: Option<Instant>,
     /// This world is open to the network (game/lan.rs).
     lan: Option<lan::LanHost>,
@@ -8214,7 +8220,9 @@ impl Game<'_> {
         let look = self.look_options();
         let time = self.started.elapsed().as_secs_f64();
         let pointer = self.captured || self.agent_pointer;
-        let grabbed = pointer && self.screen == Screen::Playing && self.player.is_some();
+        let in_studio = self.studio_freecam.active || self.studio_replay.is_some();
+        let grabbed =
+            pointer && self.screen == Screen::Playing && (self.player.is_some() || in_studio);
         let active = self.focused || self.agent_pointer;
         if let Some((xo, yo)) = self
             .mouse
@@ -9111,6 +9119,20 @@ impl Game<'_> {
             // 4. Export Dialog modal
             self.studio_export
                 .render(&mut batch, &self.gui.atlas, self.cursor);
+
+            // 5. macOS-Style Top Menu Bar
+            let rec_name = self
+                .studio_replay_path
+                .as_deref()
+                .and_then(|p| std::path::Path::new(p).file_name().and_then(|s| s.to_str()));
+            self.studio_topbar.render(
+                &mut batch,
+                &self.gui.atlas,
+                self.cursor,
+                self.studio_replay.as_ref(),
+                rec_name,
+                self.studio_freecam.locked_to_path,
+            );
         }
         batch
     }
@@ -16785,9 +16807,21 @@ impl Game<'_> {
             KeyCode::Escape => match self.screen {
                 Screen::Options => self.options_key(KeyCode::Escape, None)?,
                 Screen::Playing => {
-                    if (self.studio_freecam.active || self.studio_replay.is_some()) && self.captured
-                    {
-                        self.capture(false);
+                    if self.studio_freecam.active || self.studio_replay.is_some() {
+                        if self.studio_rmb_down || self.captured {
+                            self.studio_rmb_down = false;
+                            self.capture(false);
+                            return Ok(());
+                        }
+                        if self.studio_topbar.open_menu.is_some() {
+                            self.studio_topbar.close_dropdown();
+                            return Ok(());
+                        }
+                        if self.studio_export.open {
+                            self.studio_export.open = false;
+                            return Ok(());
+                        }
+                        self.close_studio_replay()?;
                         return Ok(());
                     }
                     self.pause_focus = None;
@@ -16892,7 +16926,10 @@ impl Game<'_> {
             KeyCode::KeyE
                 if self.screen == Screen::Creative && self.creative_screen.tab().search => {}
             KeyCode::KeyE => match self.screen {
-                Screen::Playing if self.spectator() => {}
+                Screen::Playing
+                    if self.spectator()
+                        || self.studio_freecam.active
+                        || self.studio_replay.is_some() => {}
                 Screen::Playing => {
                     // handleKeybinds: the number keys select before key.inventory.
                     self.select_queued_hotbar();
@@ -16949,7 +16986,11 @@ impl Game<'_> {
                 self.player_on_equip("mainhand", offhand.as_ref(), main.as_ref());
                 self.using = None;
             }
-            KeyCode::KeyQ if self.screen == Screen::Playing => {
+            KeyCode::KeyQ
+                if self.screen == Screen::Playing
+                    && !self.studio_freecam.active
+                    && self.studio_replay.is_none() =>
+            {
                 // handleKeybinds: the number keys select before key.drop.
                 self.select_queued_hotbar();
                 let all = drop_whole_stack(self.modifiers);
@@ -18430,6 +18471,20 @@ impl Game<'_> {
                     if !pressed {
                         self.studio_timeline.handle_mouse_up();
                     }
+                    if (self.studio_freecam.active || self.studio_replay.is_some())
+                        && button == MouseButton::Right
+                    {
+                        if pressed {
+                            self.studio_topbar.close_dropdown();
+                            self.studio_rmb_down = true;
+                            self.capture(true);
+                            return Ok(());
+                        } else if self.studio_rmb_down {
+                            self.studio_rmb_down = false;
+                            self.capture(false);
+                            return Ok(());
+                        }
+                    }
                     if pressed
                         && button == MouseButton::Left
                         && (self.studio_freecam.active || self.studio_replay.is_some())
@@ -18440,6 +18495,122 @@ impl Game<'_> {
                             .map(|r| [r.config.width, r.config.height])
                             .unwrap_or([1, 1]);
                         let b = HudBatch::new(size);
+
+                        // 0. macOS-Style Top Bar Click Check
+                        let had_open_menu = self.studio_topbar.open_menu.is_some();
+                        let topbar_action =
+                            self.studio_topbar
+                                .handle_mouse_click(self.cursor, b.width, b.height);
+                        match topbar_action {
+                            horizon_client::studio::TopBarAction::OpenPauseMenu => {
+                                self.pause_focus = None;
+                                self.screen = Screen::Paused;
+                                self.pause_menu = true;
+                                self.capture(false);
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::ExitStudio => {
+                                self.close_studio_replay()?;
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::ExportVideo => {
+                                self.studio_export.open = true;
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::OpenRecordingsFolder => {
+                                let dir = std::path::PathBuf::from("recordings");
+                                let _ = std::fs::create_dir_all(&dir);
+                                packs::open_folder(&dir);
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::ResetCameraToPlayer => {
+                                let (pos, yaw, pitch) = if let Some(p) = &self.player {
+                                    (
+                                        glam::DVec3::new(
+                                            p.position.x,
+                                            p.position.y + 1.62,
+                                            p.position.z,
+                                        ),
+                                        self.yaw,
+                                        self.pitch,
+                                    )
+                                } else {
+                                    (glam::DVec3::ZERO, 0.0, 0.0)
+                                };
+                                self.studio_freecam
+                                    .activate(pos, yaw, pitch, self.settings.fov);
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::ToggleLockToPath => {
+                                self.studio_freecam.locked_to_path =
+                                    !self.studio_freecam.locked_to_path;
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::AddKeyframe => {
+                                let time_ms =
+                                    self.studio_timeline.current_time_ms.min(u32::MAX as u64)
+                                        as u32;
+                                let kf = horizon_client::studio::CameraKeyframe::new(
+                                    time_ms,
+                                    [
+                                        self.studio_freecam.position.x,
+                                        self.studio_freecam.position.y,
+                                        self.studio_freecam.position.z,
+                                    ],
+                                    self.studio_freecam.yaw,
+                                    self.studio_freecam.pitch,
+                                    self.studio_freecam.fov,
+                                );
+                                self.studio_freecam.track.insert(kf);
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::ClearKeyframes => {
+                                self.studio_freecam.track.keyframes.clear();
+                                self.studio_timeline.selected_keyframe = None;
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::ToggleVisualsSidebar => {
+                                self.studio_visuals.open = !self.studio_visuals.open;
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::ToggleTimeline => {
+                                self.studio_timeline.visible = !self.studio_timeline.visible;
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::CycleGuides => {
+                                match (
+                                    self.studio_visuals.settings.guide_rule_of_thirds,
+                                    self.studio_visuals.settings.guide_center,
+                                ) {
+                                    (false, false) => {
+                                        self.studio_visuals.settings.guide_rule_of_thirds = true;
+                                        self.studio_visuals.settings.guide_center = false;
+                                    }
+                                    (true, false) => {
+                                        self.studio_visuals.settings.guide_rule_of_thirds = false;
+                                        self.studio_visuals.settings.guide_center = true;
+                                    }
+                                    (false, true) => {
+                                        self.studio_visuals.settings.guide_rule_of_thirds = true;
+                                        self.studio_visuals.settings.guide_center = true;
+                                    }
+                                    _ => {
+                                        self.studio_visuals.settings.guide_rule_of_thirds = false;
+                                        self.studio_visuals.settings.guide_center = false;
+                                    }
+                                }
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::CycleAspectRatio => {
+                                self.studio_visuals.settings.aspect_ratio =
+                                    self.studio_visuals.settings.aspect_ratio.cycle();
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::None => {}
+                        }
+                        if self.cursor.1 <= self.studio_topbar.height || had_open_menu {
+                            return Ok(());
+                        }
 
                         // 1. Export Dialog modal check
                         if self.studio_export.open
@@ -18616,6 +18787,9 @@ impl Game<'_> {
                     }
                     match self.screen {
                         Screen::Playing => {
+                            if self.studio_freecam.active || self.studio_replay.is_some() {
+                                return Ok(());
+                            }
                             if pressed && !self.captured {
                                 self.capture(true);
                                 return Ok(());
@@ -19081,8 +19255,11 @@ impl Game<'_> {
                             - f64::from(u8::from(held(KeyCode::KeyS)));
                         let strafe = f64::from(u8::from(held(KeyCode::KeyD)))
                             - f64::from(u8::from(held(KeyCode::KeyA)));
-                        let vertical = f64::from(u8::from(held(KeyCode::Space)))
-                            - f64::from(u8::from(held(KeyCode::ShiftLeft)));
+                        let vertical =
+                            f64::from(u8::from(held(KeyCode::Space) || held(KeyCode::KeyE)))
+                                - f64::from(u8::from(
+                                    held(KeyCode::ShiftLeft) || held(KeyCode::KeyQ),
+                                ));
                         let fast_boost = held(KeyCode::ControlLeft);
                         let secs = elapsed.as_secs_f64().min(0.1);
                         self.studio_freecam
@@ -19896,6 +20073,9 @@ impl<'a> Game<'a> {
             studio_timeline: Default::default(),
             studio_visuals: Default::default(),
             studio_export: Default::default(),
+            studio_topbar: Default::default(),
+            studio_replay_path: None,
+            studio_rmb_down: false,
             last_replay_tick: None,
             lan: None,
             integrated: None,

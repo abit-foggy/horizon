@@ -115,11 +115,11 @@ impl StudioFreecam {
         let forward_dir = glam::DVec3::new(
             -yaw_rad.sin() * pitch_rad.cos(),
             -pitch_rad.sin(),
-            -yaw_rad.cos() * pitch_rad.cos(),
+            yaw_rad.cos() * pitch_rad.cos(),
         )
         .normalize_or_zero();
 
-        let right_dir = glam::DVec3::new(yaw_rad.cos(), 0.0, -yaw_rad.sin()).normalize_or_zero();
+        let right_dir = glam::DVec3::new(-yaw_rad.cos(), 0.0, -yaw_rad.sin()).normalize_or_zero();
 
         let up_dir = glam::DVec3::new(0.0, 1.0, 0.0);
 
@@ -189,7 +189,12 @@ mod tests {
         assert_eq!(freecam.yaw, 45.0);
         assert_eq!(freecam.pitch, -10.0);
 
-        // Fly forward for 1 second
+        // Fly forward for 1 second (facing yaw 0, forward is +Z)
+        let mut forward_test = StudioFreecam::new();
+        forward_test.activate(glam::DVec3::ZERO, 0.0, 0.0, 70.0);
+        forward_test.update_flight_motion(1.0, 0.0, 0.0, false, 0.1);
+        assert!(forward_test.position.z > 0.0);
+
         freecam.update_flight_motion(1.0, 0.0, 0.0, false, 0.1);
         assert!(freecam.position != glam::DVec3::new(10.0, 64.0, 10.0));
 

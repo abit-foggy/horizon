@@ -6081,6 +6081,13 @@ impl Game<'_> {
         self.previous_position = position;
         self.yaw = yaw;
         self.pitch = pitch;
+        if (self.studio_replay.is_some() || self.studio_freecam.active)
+            && self.studio_freecam.position == glam::DVec3::ZERO
+        {
+            let eye = glam::DVec3::new(position.x, position.y + 1.62, position.z);
+            self.studio_freecam
+                .activate(eye, yaw, pitch, self.settings.fov);
+        }
         // setValuesFromPositionPacket: setOldPosAndRot gives xRotO the same
         // change, so a relative pitch keeps the model's ease and an absolute
         // one snaps it.

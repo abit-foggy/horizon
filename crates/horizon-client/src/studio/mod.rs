@@ -12,6 +12,7 @@ pub mod recorder;
 pub mod replay;
 pub mod spline;
 pub mod timeline_ui;
+pub mod topbar;
 pub mod visuals_ui;
 
 pub use camera::StudioFreecam;
@@ -25,4 +26,5 @@ pub use recorder::{RecorderStatus, StudioRecorder, generate_recording_filename};
 pub use replay::ReplayDriver;
 pub use spline::{CameraKeyframe, CameraTrack, EvaluatedPose};
 pub use timeline_ui::{TimelineAction, TimelineTrackKind, TimelineUi};
+pub use topbar::{TopBarAction, TopBarMenu, TopBarUi};
 pub use visuals_ui::{AspectRatio, VisualsSettings, VisualsUi};
