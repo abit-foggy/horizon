@@ -1,8 +1,8 @@
 //! Timeline HUD Overlay
 //!
-//! Multi-track keyframe sequencer and transport controller docked to the bottom
-//! of the screen. Supports scrubbing, zooming, multi-track keyframe insertion,
-//! selection, deletion, and transport controls.
+//! Unified master sequence bar and transport controller docked to the bottom
+//! of the screen. Supports scrubbing, zooming, keyframe insertion, selection,
+//! deletion, and cutting/splitting the sequence between frames/scenes.
 
 use super::camera::StudioFreecam;
 use horizon_client_render::{
@@ -15,6 +15,7 @@ use horizon_client_render::{
 /// Track types on the studio timeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimelineTrackKind {
+    Sequence,
     Camera,
     Fov,
     Timelapse,
@@ -24,6 +25,7 @@ pub enum TimelineTrackKind {
 impl TimelineTrackKind {
     pub fn name(self) -> &'static str {
         match self {
+            Self::Sequence => "Sequence",
             Self::Camera => "Camera",
             Self::Fov => "FOV",
             Self::Timelapse => "Timelapse",
@@ -46,6 +48,7 @@ pub enum TimelineAction {
     AddCameraKeyframe,
     RemoveCameraKeyframe(usize),
     SelectKeyframe(usize),
+    SplitClip(u64),
     OpenExportDialog,
     ToggleVisualsSidebar,
     None,
@@ -65,6 +68,7 @@ pub struct TimelineUi {
     pub dragging_playhead: bool,
     pub dragging_keyframe: Option<usize>,
     pub active_tracks: Vec<TimelineTrackKind>,
+    pub split_points: Vec<u64>,
 }
 
 impl Default for TimelineUi {
@@ -80,11 +84,8 @@ impl Default for TimelineUi {
             selected_keyframe: None,
             dragging_playhead: false,
             dragging_keyframe: None,
-            active_tracks: vec![
-                TimelineTrackKind::Camera,
-                TimelineTrackKind::Fov,
-                TimelineTrackKind::Timelapse,
-            ],
+            active_tracks: vec![TimelineTrackKind::Sequence],
+            split_points: Vec::new(),
         }
     }
 }
@@ -94,10 +95,55 @@ impl TimelineUi {
         Self::default()
     }
 
-    /// Total timeline height in GUI pixels.
+    /// Total timeline height in GUI pixels: Header (24px) + Ruler (18px) + Master Sequence Bar (26px) + Spacing (8px).
     pub fn height(&self) -> f32 {
-        // Header: 24px, Ruler: 18px, Tracks: ~20px each + spacing
-        42.0 + (self.active_tracks.len() as f32 * 22.0) + 8.0
+        76.0
+    }
+
+    /// Split or cut the clip/sequence at `time_ms`.
+    /// If within 250ms of an existing cut, toggles/removes that cut.
+    pub fn split_at(&mut self, time_ms: u64) {
+        if time_ms == 0 || time_ms >= self.duration_ms {
+            return;
+        }
+        if let Some(pos) = self
+            .split_points
+            .iter()
+            .position(|&t| (t as i64 - time_ms as i64).abs() < 250)
+        {
+            self.split_points.remove(pos);
+        } else {
+            self.split_points.push(time_ms);
+            self.split_points.sort_unstable();
+        }
+    }
+
+    /// Returns the index of a keyframe under `cursor`, if any.
+    pub fn keyframe_at_cursor(
+        &self,
+        cursor: (f32, f32),
+        screen_w: f32,
+        screen_h: f32,
+        freecam: &StudioFreecam,
+    ) -> Option<usize> {
+        let panel_h = self.height();
+        let panel_y = screen_h - panel_h;
+        let ruler_y = panel_y + 24.0;
+        let bar_y = ruler_y + 18.0;
+        let bar_h = 24.0;
+        let track_start_x = 90.0;
+        let track_w = screen_w - track_start_x - 10.0;
+        let total_dur = self.duration_ms.max(1) as f32;
+
+        for (idx, kf) in freecam.track.keyframes.iter().enumerate() {
+            let norm = (kf.time_ms as f32 / total_dur).clamp(0.0, 1.0);
+            let kx = track_start_x + norm * track_w;
+            let ky = bar_y + (bar_h * 0.5);
+            if (cursor.0 - kx).abs() <= 8.0 && (cursor.1 - ky).abs() <= 10.0 {
+                return Some(idx);
+            }
+        }
+        None
     }
 
     /// Render the timeline overlay onto `batch`.
@@ -121,7 +167,7 @@ impl TimelineUi {
         // 1. Draw glass background panel
         style::panel(batch, atlas, panel_rect);
 
-        // 2. Transport Header Bar
+        // 2. Transport & Action Header Bar
         let header_y = panel_y + 3.0;
         self.render_header(batch, atlas, cursor, freecam, header_y, screen_w);
 
@@ -131,23 +177,19 @@ impl TimelineUi {
         let track_w = screen_w - track_start_x - 10.0;
         self.render_ruler(batch, atlas, cursor, ruler_y, track_start_x, track_w);
 
-        // 4. Tracks (Camera, FOV, Timelapse, etc.)
-        let mut curr_y = ruler_y + 18.0;
-        for track in &self.active_tracks {
-            self.render_track_row(
-                batch,
-                atlas,
-                cursor,
-                freecam,
-                *track,
-                curr_y,
-                track_start_x,
-                track_w,
-            );
-            curr_y += 22.0;
-        }
+        // 4. Unified Big Master Sequence Bar with Scenes and Keyframes
+        let bar_y = ruler_y + 18.0;
+        self.render_master_sequence_bar(
+            batch,
+            atlas,
+            cursor,
+            freecam,
+            bar_y,
+            track_start_x,
+            track_w,
+        );
 
-        // 5. Draw Playhead Vertical Indicator
+        // 5. Draw Playhead Vertical Scrubber
         self.render_playhead(
             batch,
             atlas,
@@ -243,6 +285,41 @@ impl TimelineUi {
             &Text::literal(freecam_label),
             (freecam_hover, true, freecam.active),
         );
+        x += 84.0;
+
+        // Keyframe controls: [+ Key] [- Del] [Split]
+        let add_w = 40.0;
+        let add_hover = ui::hovered(cursor, x, y, add_w, btn_h);
+        style::button(
+            batch,
+            atlas,
+            [x, y, add_w, btn_h],
+            &Text::literal("+ Key"),
+            (add_hover, true, false),
+        );
+        x += add_w + 3.0;
+
+        let has_sel = self.selected_keyframe.is_some();
+        let del_w = 38.0;
+        let del_hover = ui::hovered(cursor, x, y, del_w, btn_h);
+        style::button(
+            batch,
+            atlas,
+            [x, y, del_w, btn_h],
+            &Text::literal("- Del"),
+            (del_hover, has_sel, has_sel),
+        );
+        x += del_w + 3.0;
+
+        let split_w = 38.0;
+        let split_hover = ui::hovered(cursor, x, y, split_w, btn_h);
+        style::button(
+            batch,
+            atlas,
+            [x, y, split_w, btn_h],
+            &Text::literal("Split"),
+            (split_hover, true, false),
+        );
 
         // Right side: Visuals toggle & Export button
         let export_w = 64.0;
@@ -316,86 +393,110 @@ impl TimelineUi {
         }
     }
 
-    fn render_track_row(
+    /// Render the unified big master sequence bar with scene blocks, splits, and keyframes.
+    fn render_master_sequence_bar(
         &self,
         batch: &mut HudBatch,
         atlas: &HudAtlas,
-        cursor: (f32, f32),
+        _cursor: (f32, f32),
         freecam: &StudioFreecam,
-        kind: TimelineTrackKind,
         y: f32,
         start_x: f32,
         track_w: f32,
     ) {
-        // Track Header (left column: label and [+] [-] [o] buttons)
-        let label_w = 44.0;
+        let bar_h = 24.0;
+
+        // Track label column
+        let num_scenes = self.split_points.len() + 1;
+        let track_lbl = if num_scenes > 1 {
+            format!("{num_scenes} Scenes")
+        } else {
+            "Sequence".to_string()
+        };
         batch.text_styled(
             atlas,
-            &Text::literal(kind.name()),
+            &Text::literal(&track_lbl),
             6.0,
-            y + 4.0,
+            y + 6.0,
             style::WHITE,
             true,
         );
 
-        let btn_sz = 12.0;
-        let mut bx = 6.0 + label_w;
-
-        // [+] Add Keyframe
-        let add_rect = [bx, y + 3.0, btn_sz, btn_sz];
-        let add_hover = ui::hovered(cursor, bx, y + 3.0, btn_sz, btn_sz);
-        style::button(
-            batch,
-            atlas,
-            add_rect,
-            &Text::literal("+"),
-            (add_hover, true, false),
-        );
-        bx += btn_sz + 2.0;
-
-        // [-] Remove Keyframe
-        let sub_rect = [bx, y + 3.0, btn_sz, btn_sz];
-        let sub_hover = ui::hovered(cursor, bx, y + 3.0, btn_sz, btn_sz);
-        let has_sel = self.selected_keyframe.is_some();
-        style::button(
-            batch,
-            atlas,
-            sub_rect,
-            &Text::literal("-"),
-            (sub_hover, has_sel, false),
-        );
-        bx += btn_sz + 2.0;
-
-        // [o] Jump to Keyframe
-        let jump_rect = [bx, y + 3.0, btn_sz, btn_sz];
-        let jump_hover = ui::hovered(cursor, bx, y + 3.0, btn_sz, btn_sz);
-        style::button(
-            batch,
-            atlas,
-            jump_rect,
-            &Text::literal("o"),
-            (jump_hover, true, false),
-        );
-
-        // Track Lane
-        let lane_rect = [start_x, y + 2.0, track_w, 16.0];
-        style::fill(batch, atlas, lane_rect, style::GROUP);
+        // Base lane well
+        let lane_rect = [start_x, y, track_w, bar_h];
+        style::fill(batch, atlas, lane_rect, 0xFF14_171F);
         style::ring(batch, atlas, lane_rect, style::ROW_RULE);
 
-        // Render keyframe markers for Camera track
-        if kind == TimelineTrackKind::Camera {
-            let total_dur = self.duration_ms.max(1) as f32;
-            for (idx, kf) in freecam.track.keyframes.iter().enumerate() {
-                let norm = (kf.time_ms as f32 / total_dur).clamp(0.0, 1.0);
-                let kx = start_x + norm * track_w;
-                let ky = y + 5.0;
+        let total_dur = self.duration_ms.max(1) as f32;
 
-                let is_sel = self.selected_keyframe == Some(idx);
-                let node_color = if is_sel { style::FACE } else { style::ACCENT };
-
-                // Draw keyframe diamond ◆
-                self.draw_diamond(batch, atlas, kx, ky, 8.0, node_color);
+        // Render scene blocks between split points
+        let mut segments = Vec::new();
+        let mut prev_t = 0u64;
+        for &split_t in &self.split_points {
+            if split_t > prev_t && split_t < self.duration_ms {
+                segments.push((prev_t, split_t));
+                prev_t = split_t;
             }
+        }
+        segments.push((prev_t, self.duration_ms));
+
+        for (idx, (t0, t1)) in segments.iter().enumerate() {
+            let norm0 = (*t0 as f32 / total_dur).clamp(0.0, 1.0);
+            let norm1 = (*t1 as f32 / total_dur).clamp(0.0, 1.0);
+            let seg_x = start_x + norm0 * track_w;
+            let seg_w = ((norm1 - norm0) * track_w).max(2.0);
+
+            // Alternating clip background shades
+            let bg_color = if idx % 2 == 0 {
+                0xFF22_2735
+            } else {
+                0xFF2A_3040
+            };
+            style::fill(batch, atlas, [seg_x + 1.0, y + 1.0, seg_w - 2.0, bar_h - 2.0], bg_color);
+
+            // Scene name badge inside clip
+            if seg_w > 45.0 {
+                let scene_title = format!("Scene {}", idx + 1);
+                batch.text_styled(
+                    atlas,
+                    &Text::literal(&scene_title),
+                    seg_x + 5.0,
+                    y + 5.0,
+                    style::MUTED,
+                    true,
+                );
+            }
+
+            // Split line / cut marker between scenes
+            if idx > 0 {
+                // Vertical cut line
+                style::fill(batch, atlas, [seg_x - 1.0, y, 2.0, bar_h], 0xFF8A_98B8);
+                // Top and bottom cut notch tick marks
+                style::fill(batch, atlas, [seg_x - 3.0, y, 6.0, 2.0], 0xFFB4_C4E6);
+                style::fill(batch, atlas, [seg_x - 3.0, y + bar_h - 2.0, 6.0, 2.0], 0xFFB4_C4E6);
+            }
+        }
+
+        // Render camera keyframe diamonds directly on this big master bar
+        for (idx, kf) in freecam.track.keyframes.iter().enumerate() {
+            let norm = (kf.time_ms as f32 / total_dur).clamp(0.0, 1.0);
+            let kx = start_x + norm * track_w;
+            let ky = y + (bar_h * 0.5) - 5.0;
+
+            let is_sel = self.selected_keyframe == Some(idx);
+            let node_color = if is_sel {
+                0xFFFF_C83B // Bright gold/amber selected keyframe
+            } else {
+                0xFF9E_7BFF // Violet accent unselected keyframe
+            };
+
+            // Selected keyframe halo
+            if is_sel {
+                self.draw_diamond(batch, atlas, kx, ky - 1.0, 12.0, 0x88FF_C83B);
+            }
+
+            // Draw keyframe diamond ◆
+            self.draw_diamond(batch, atlas, kx, ky, 10.0, node_color);
         }
     }
 
@@ -509,6 +610,27 @@ impl TimelineUi {
             return TimelineAction::ToggleFreecam;
         }
 
+        // Keyframe controls: [+ Key] [- Del] [Split]
+        let mut kf_x = freecam_x + 84.0;
+        let add_w = 40.0;
+        if ui::hovered(cursor, kf_x, y, add_w, btn_h) {
+            return TimelineAction::AddCameraKeyframe;
+        }
+        kf_x += add_w + 3.0;
+
+        let del_w = 38.0;
+        if ui::hovered(cursor, kf_x, y, del_w, btn_h)
+            && let Some(sel) = self.selected_keyframe
+        {
+            return TimelineAction::RemoveCameraKeyframe(sel);
+        }
+        kf_x += del_w + 3.0;
+
+        let split_w = 38.0;
+        if ui::hovered(cursor, kf_x, y, split_w, btn_h) {
+            return TimelineAction::SplitClip(self.current_time_ms);
+        }
+
         // Export button
         let export_w = 64.0;
         let export_x = screen_w - export_w - 6.0;
@@ -523,52 +645,24 @@ impl TimelineUi {
             return TimelineAction::ToggleVisualsSidebar;
         }
 
-        // Check [+] [-] [o] buttons on Camera track
-        let ruler_y = panel_y + 24.0;
-        let camera_y = ruler_y + 18.0;
-        let label_w = 44.0;
-        let btn_sz = 12.0;
-        let mut bx = 6.0 + label_w;
-
-        // [+] Add Keyframe
-        if ui::hovered(cursor, bx, camera_y + 3.0, btn_sz, btn_sz) {
-            return TimelineAction::AddCameraKeyframe;
-        }
-        bx += btn_sz + 2.0;
-
-        // [-] Remove Keyframe
-        if ui::hovered(cursor, bx, camera_y + 3.0, btn_sz, btn_sz)
-            && let Some(sel) = self.selected_keyframe
-        {
-            return TimelineAction::RemoveCameraKeyframe(sel);
-        }
-        bx += btn_sz + 2.0;
-
-        // [o] Jump to Keyframe
-        if ui::hovered(cursor, bx, camera_y + 3.0, btn_sz, btn_sz)
-            && let Some(sel) = self.selected_keyframe
-            && let Some(kf) = freecam.track.keyframes.get(sel)
-        {
-            return TimelineAction::Seek(kf.time_ms as u64);
+        // Check keyframe nodes selection in the master sequence bar
+        if let Some(idx) = self.keyframe_at_cursor(cursor, screen_w, screen_h, freecam) {
+            self.selected_keyframe = Some(idx);
+            self.dragging_keyframe = Some(idx);
+            return TimelineAction::SelectKeyframe(idx);
         }
 
-        // Check keyframe nodes selection in Camera track
+        // Check click on Ruler or Master Sequence Bar to seek playhead
         let track_start_x = 90.0;
         let track_w = screen_w - track_start_x - 10.0;
         let total_dur = self.duration_ms.max(1) as f32;
+        let ruler_y = panel_y + 24.0;
 
-        for (idx, kf) in freecam.track.keyframes.iter().enumerate() {
-            let norm = (kf.time_ms as f32 / total_dur).clamp(0.0, 1.0);
-            let kx = track_start_x + norm * track_w;
-            if (cursor.0 - kx).abs() <= 6.0 && (cursor.1 - (camera_y + 9.0)).abs() <= 8.0 {
-                self.selected_keyframe = Some(idx);
-                self.dragging_keyframe = Some(idx);
-                return TimelineAction::SelectKeyframe(idx);
-            }
-        }
-
-        // Check click on Ruler or track lane to seek playhead
-        if cursor.0 >= track_start_x && cursor.0 <= track_start_x + track_w {
+        if cursor.1 >= ruler_y
+            && cursor.1 <= screen_h
+            && cursor.0 >= track_start_x
+            && cursor.0 <= track_start_x + track_w
+        {
             let norm = ((cursor.0 - track_start_x) / track_w).clamp(0.0, 1.0);
             let seek_time = (norm * total_dur).round() as u64;
             self.current_time_ms = seek_time;
@@ -632,11 +726,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_timeline_ui_defaults() {
-        let ui = TimelineUi::new();
+    fn test_timeline_ui_defaults_and_split() {
+        let mut ui = TimelineUi::new();
         assert!(ui.visible);
         assert_eq!(ui.current_time_ms, 0);
         assert_eq!(ui.speed, 1.0);
-        assert!(ui.height() > 80.0);
+        assert_eq!(ui.height(), 76.0);
+        assert!(ui.split_points.is_empty());
+
+        // Split at 5000ms
+        ui.split_at(5000);
+        assert_eq!(ui.split_points, vec![5000]);
+
+        // Split at 12000ms
+        ui.split_at(12000);
+        assert_eq!(ui.split_points, vec![5000, 12000]);
+
+        // Splitting close to 5000ms toggles/removes it
+        ui.split_at(5100);
+        assert_eq!(ui.split_points, vec![12000]);
     }
 }

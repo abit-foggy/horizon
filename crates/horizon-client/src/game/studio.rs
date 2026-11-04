@@ -266,6 +266,29 @@ impl Game<'_> {
                         self.studio_freecam.track.keyframes.len()
                     )));
                 }
+                Some("remove") => {
+                    let idx = words
+                        .get(2)
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .or(self.studio_timeline.selected_keyframe);
+                    if let Some(i) = idx {
+                        if i < self.studio_freecam.track.keyframes.len() {
+                            self.studio_freecam.track.keyframes.remove(i);
+                            self.studio_timeline.selected_keyframe = None;
+                            self.system_message(Text::literal(format!(
+                                "Studio: Removed keyframe #{i}"
+                            )));
+                        } else {
+                            self.system_message(Text::literal(format!(
+                                "Studio: Keyframe #{i} out of bounds"
+                            )));
+                        }
+                    } else {
+                        self.system_message(Text::literal(
+                            "Studio: No keyframe selected (Usage: /studio keyframe remove [INDEX])",
+                        ));
+                    }
+                }
                 Some("clear") => {
                     self.studio_freecam.track.clear();
                     self.studio_timeline.selected_keyframe = None;

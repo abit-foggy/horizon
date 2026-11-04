@@ -18492,6 +18492,28 @@ impl Game<'_> {
                     if (self.studio_freecam.active || self.studio_replay.is_some())
                         && button == MouseButton::Right
                     {
+                        if let Some(r) = &self.renderer {
+                            let b = HudBatch::new([r.config.width, r.config.height]);
+                            if self.studio_timeline.visible
+                                && self.cursor.1 >= b.height - self.studio_timeline.height()
+                            {
+                                if pressed {
+                                    if let Some(del_idx) = self.studio_timeline.keyframe_at_cursor(
+                                        self.cursor,
+                                        b.width,
+                                        b.height,
+                                        &self.studio_freecam,
+                                    ) {
+                                        if del_idx < self.studio_freecam.track.keyframes.len() {
+                                            self.studio_freecam.track.keyframes.remove(del_idx);
+                                        }
+                                        self.studio_timeline.selected_keyframe = None;
+                                        return Ok(());
+                                    }
+                                }
+                                return Ok(());
+                            }
+                        }
                         if pressed {
                             self.studio_topbar.close_dropdown();
                             self.studio_rmb_down = true;
@@ -18775,6 +18797,10 @@ impl Game<'_> {
                                 }
                                 horizon_client::studio::TimelineAction::OpenExportDialog => {
                                     self.studio_export.open = true;
+                                    return Ok(());
+                                }
+                                horizon_client::studio::TimelineAction::SplitClip(time_ms) => {
+                                    self.studio_timeline.split_at(time_ms);
                                     return Ok(());
                                 }
                                 horizon_client::studio::TimelineAction::ToggleVisualsSidebar => {
@@ -19277,7 +19303,24 @@ impl Game<'_> {
                             return Ok(());
                         }
 
-                        // 6. G: Cycle Framing Guides
+                        // 6. Delete / Backspace: Remove selected keyframe
+                        if (key == KeyCode::Delete || key == KeyCode::Backspace)
+                            && let Some(idx) = self.studio_timeline.selected_keyframe
+                        {
+                            if idx < self.studio_freecam.track.keyframes.len() {
+                                self.studio_freecam.track.keyframes.remove(idx);
+                            }
+                            self.studio_timeline.selected_keyframe = None;
+                            return Ok(());
+                        }
+
+                        // 7. S: Split scene at playhead (when not holding RMB flight look)
+                        if key == KeyCode::KeyS && !self.studio_rmb_down && !self.captured {
+                            self.studio_timeline.split_at(self.studio_timeline.current_time_ms);
+                            return Ok(());
+                        }
+
+                        // 8. G: Cycle Framing Guides
                         if key == KeyCode::KeyG {
                             let (g3, gc) = (
                                 self.studio_visuals.settings.guide_rule_of_thirds,
