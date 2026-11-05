@@ -1513,6 +1513,8 @@ pub enum Event {
     PlayMusicTrack(String, String),
     /// Open the recordings folder in the system file browser.
     OpenStudioFolder,
+    /// Open the selected recording in the Studio editor.
+    OpenStudioReplay(std::path::PathBuf),
 }
 /// A row of the Music page: the track, and the pool it is played from.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -4090,6 +4092,9 @@ impl OptionsUi {
             use crate::studio_ui::StudioAction;
             return match self.studio.click((x, y), size) {
                 StudioAction::None => Vec::new(),
+                StudioAction::LoadAndEdit(path) => {
+                    vec![Event::ButtonClick, Event::OpenStudioReplay(path)]
+                }
                 StudioAction::OpenSettings => {
                     self.push(Page::StudioSettings);
                     vec![Event::ButtonClick]

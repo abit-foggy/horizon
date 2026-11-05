@@ -70,6 +70,8 @@ pub struct TimelineUi {
     pub dragging_keyframe: Option<usize>,
     pub active_tracks: Vec<TimelineTrackKind>,
     pub split_points: Vec<u64>,
+    pub selected_scene: usize,
+    pub markers: Vec<Marker>,
 }
 
 impl Default for TimelineUi {
@@ -87,6 +89,8 @@ impl Default for TimelineUi {
             dragging_keyframe: None,
             active_tracks: vec![TimelineTrackKind::Sequence],
             split_points: Vec::new(),
+            selected_scene: 0,
+            markers: Vec::new(),
         }
     }
 }
@@ -99,6 +103,30 @@ impl TimelineUi {
     /// Total timeline height in GUI pixels: Header (24px) + Ruler (18px) + Master Sequence Bar (26px) + Spacing (8px).
     pub fn height(&self) -> f32 {
         76.0
+    }
+
+    /// Returns the scene index (0-based) for a given time in milliseconds.
+    pub fn scene_at_time(&self, time_ms: u64) -> usize {
+        let mut idx = 0;
+        for &split_t in &self.split_points {
+            if time_ms >= split_t {
+                idx += 1;
+            } else {
+                break;
+            }
+        }
+        idx
+    }
+
+    /// Returns the start time in milliseconds for the given scene index.
+    pub fn scene_start_time(&self, scene_idx: usize) -> u64 {
+        if scene_idx == 0 {
+            0
+        } else if scene_idx <= self.split_points.len() {
+            self.split_points[scene_idx - 1]
+        } else {
+            self.duration_ms
+        }
     }
 
     /// Split or cut the clip/sequence at `time_ms`.
@@ -117,6 +145,7 @@ impl TimelineUi {
             self.split_points.push(time_ms);
             self.split_points.sort_unstable();
         }
+        self.selected_scene = self.scene_at_time(self.current_time_ms);
     }
 
     /// Returns the index of a keyframe under `cursor`, if any.
@@ -460,6 +489,16 @@ impl TimelineUi {
                 bg_color,
             );
 
+            // Highlight border for selected scene
+            if self.selected_scene == idx {
+                style::ring(
+                    batch,
+                    atlas,
+                    [seg_x + 1.0, y + 1.0, seg_w - 2.0, bar_h - 2.0],
+                    0xFFFF_C83B,
+                );
+            }
+
             // Scene name badge inside clip
             if seg_w > 45.0 {
                 let scene_title = format!("Scene {}", idx + 1);
@@ -674,17 +713,30 @@ impl TimelineUi {
         let track_w = screen_w - track_start_x - 10.0;
         let total_dur = self.duration_ms.max(1) as f32;
         let ruler_y = panel_y + 24.0;
+        let bar_y = ruler_y + 18.0;
+        let bar_h = 24.0;
 
-        if cursor.1 >= ruler_y
-            && cursor.1 <= screen_h
-            && cursor.0 >= track_start_x
-            && cursor.0 <= track_start_x + track_w
-        {
+        if cursor.0 >= track_start_x && cursor.0 <= track_start_x + track_w {
             let norm = ((cursor.0 - track_start_x) / track_w).clamp(0.0, 1.0);
-            let seek_time = (norm * total_dur).round() as u64;
-            self.current_time_ms = seek_time;
-            self.dragging_playhead = true;
-            return TimelineAction::Seek(seek_time);
+            let click_time = (norm * total_dur).round() as u64;
+
+            // Click on Master Sequence Bar: snap slider to selected scene start
+            if cursor.1 >= bar_y && cursor.1 <= bar_y + bar_h {
+                let scene = self.scene_at_time(click_time);
+                self.selected_scene = scene;
+                let scene_start = self.scene_start_time(scene);
+                self.current_time_ms = scene_start;
+                self.dragging_playhead = true;
+                return TimelineAction::Seek(scene_start);
+            }
+
+            // Click on Ruler: scrub playhead smoothly
+            if cursor.1 >= ruler_y && cursor.1 <= screen_h {
+                self.selected_scene = self.scene_at_time(click_time);
+                self.current_time_ms = click_time;
+                self.dragging_playhead = true;
+                return TimelineAction::Seek(click_time);
+            }
         }
 
         TimelineAction::None
@@ -705,6 +757,7 @@ impl TimelineUi {
 
         if self.dragging_playhead {
             self.current_time_ms = time_ms;
+            self.selected_scene = self.scene_at_time(time_ms);
             return TimelineAction::Seek(time_ms);
         }
 
@@ -762,5 +815,50 @@ mod tests {
         // Splitting close to 5000ms toggles/removes it
         ui.split_at(5100);
         assert_eq!(ui.split_points, vec![12000]);
+    }
+
+    #[test]
+    fn test_scene_click_snaps_playhead() {
+        let mut ui = TimelineUi::new();
+        ui.duration_ms = 30_000;
+        ui.split_at(10_000);
+        ui.split_at(20_000);
+
+        assert_eq!(ui.scene_at_time(0), 0);
+        assert_eq!(ui.scene_at_time(5_000), 0);
+        assert_eq!(ui.scene_at_time(10_000), 1);
+        assert_eq!(ui.scene_at_time(15_000), 1);
+        assert_eq!(ui.scene_at_time(20_000), 2);
+        assert_eq!(ui.scene_at_time(25_000), 2);
+
+        let screen_w = 1000.0;
+        let screen_h = 700.0;
+        let freecam = StudioFreecam::default();
+
+        let track_start_x = 90.0;
+        let track_w = screen_w - track_start_x - 10.0; // 900.0
+        let panel_h = ui.height(); // 76.0
+        let panel_y = screen_h - panel_h; // 624.0
+        let ruler_y = panel_y + 24.0; // 648.0
+        let bar_y = ruler_y + 18.0; // 666.0
+        let click_y = bar_y + 10.0; // Inside master sequence bar
+
+        // Click in Scene 2 (halfway through timeline = 15_000ms = norm 0.5)
+        let click_x = track_start_x + 0.5 * track_w;
+        let action = ui.handle_mouse_down((click_x, click_y), screen_w, screen_h, &freecam);
+
+        // Slider/playhead snaps to start of Scene 2 (10_000ms)
+        assert_eq!(action, TimelineAction::Seek(10_000));
+        assert_eq!(ui.current_time_ms, 10_000);
+        assert_eq!(ui.selected_scene, 1);
+
+        // Click in Scene 3 (80% through timeline = 24_000ms = norm 0.8)
+        let click_x3 = track_start_x + 0.8 * track_w;
+        let action3 = ui.handle_mouse_down((click_x3, click_y), screen_w, screen_h, &freecam);
+
+        // Slider/playhead snaps to start of Scene 3 (20_000ms)
+        assert_eq!(action3, TimelineAction::Seek(20_000));
+        assert_eq!(ui.current_time_ms, 20_000);
+        assert_eq!(ui.selected_scene, 2);
     }
 }

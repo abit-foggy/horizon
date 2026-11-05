@@ -17,6 +17,16 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+/// One player's optional local-only appearance data for a Studio recording.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct StoredAppearance {
+    pub uuid: u128,
+    pub name: Option<String>,
+    pub slim: bool,
+    pub skin_rgba: Option<Vec<u8>>,
+    pub cape_rgba: Option<Vec<u8>>,
+}
+
 static RECORDING_NAME_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Commands sent to the background recording thread.
@@ -50,6 +60,7 @@ pub struct StudioRecorder {
     start_time: Instant,
     dest_path: PathBuf,
     appearance_capture: (bool, bool),
+    capture_sounds: bool,
     anonymous_ids: std::sync::Mutex<HashMap<u128, u128>>,
     appearances: std::sync::Mutex<HashMap<u128, StoredAppearance>>,
 }
@@ -72,6 +83,7 @@ impl StudioRecorder {
             metadata,
             capture_skins,
             capture_names,
+            true,
             None,
             None,
         )
@@ -82,6 +94,7 @@ impl StudioRecorder {
         mut metadata: Metadata,
         capture_skins: bool,
         capture_names: bool,
+        capture_sounds: bool,
         mods_json: Option<Vec<u8>>,
         resource_pack: Option<PathBuf>,
     ) -> io::Result<Self> {
@@ -133,16 +146,20 @@ impl StudioRecorder {
                 }
                 // Drain any lingering packets in queue
                 while let Ok(cmd) = receiver.try_recv() {
-                    if let RecordCommand::Packet(pkt) = cmd {
-                        duration_ms = duration_ms.max(pkt.timestamp_ms);
-                        if let Err(error) =
-                            writer.write_packet(pkt.timestamp_ms, pkt.id, &pkt.payload)
-                        {
-                            *worker_failure.lock().unwrap() = Some(error.to_string());
-                            break;
+                    match cmd {
+                        RecordCommand::Packet(pkt) => {
+                            duration_ms = duration_ms.max(pkt.timestamp_ms);
+                            if let Err(error) =
+                                writer.write_packet(pkt.timestamp_ms, pkt.id, &pkt.payload)
+                            {
+                                *worker_failure.lock().unwrap() = Some(error.to_string());
+                                break;
+                            }
+                            worker_count.fetch_add(1, Ordering::Relaxed);
+                            worker_bytes.store(writer.bytes_written(), Ordering::Relaxed);
                         }
-                        worker_count.fetch_add(1, Ordering::Relaxed);
-                        worker_bytes.store(writer.bytes_written(), Ordering::Relaxed);
+                        RecordCommand::Marker(time_ms, label) => writer.add_marker(time_ms, label),
+                        RecordCommand::Stop => break,
                     }
                 }
                 worker_active.store(false, Ordering::SeqCst);
@@ -165,6 +182,7 @@ impl StudioRecorder {
             start_time,
             dest_path,
             appearance_capture: (capture_skins, capture_names),
+            capture_sounds,
             anonymous_ids: std::sync::Mutex::new(HashMap::new()),
             appearances: std::sync::Mutex::new(HashMap::new()),
         })
@@ -254,33 +272,8 @@ impl StudioRecorder {
     pub fn record_packet(&self, id: i32, payload: &[u8]) {
         let Some((id, payload)) = self.sanitized_packet(id, payload) else {
             return;
-        }
-        let timestamp_ms = self.start_time.elapsed().as_millis() as u32;
-        let pkt = TimestampedPacket::new(timestamp_ms, id, payload.to_vec());
-        if let Err(error) = self.sender.try_send(RecordCommand::Packet(pkt)) {
-            let message = match error {
-                TrySendError::Full(_) => "recorder queue is full; capture stopped",
-                TrySendError::Disconnected(_) => "recorder worker stopped unexpectedly",
-            };
-            *self.failure.lock().unwrap() = Some(message.into());
-            self.active.store(false, Ordering::SeqCst);
-        }
-    }
-
-    /// Record a clientbound packet at an explicit timestamp (e.g. 0ms for initial world baseline).
-    pub fn record_packet_at(&self, timestamp_ms: u32, id: i32, payload: &[u8]) {
-        if !self.active.load(Ordering::Relaxed) {
-            return;
-        }
-        let pkt = TimestampedPacket::new(timestamp_ms, id, payload.to_vec());
-        if let Err(error) = self.sender.try_send(RecordCommand::Packet(pkt)) {
-            let message = match error {
-                TrySendError::Full(_) => "recorder queue is full; capture stopped",
-                TrySendError::Disconnected(_) => "recorder worker stopped unexpectedly",
-            };
-            *self.failure.lock().unwrap() = Some(message.into());
-            self.active.store(false, Ordering::SeqCst);
-        }
+        };
+        self.queue_packet(id, &payload, None);
     }
 
     /// Record a packet at a supplied timestamp after applying the privacy filter.
@@ -306,6 +299,11 @@ impl StudioRecorder {
             // retain opaque packets from explicit snapshot callers unchanged.
             return Some((id, payload.to_vec()));
         };
+        if !self.capture_sounds
+            && matches!(&packet, C::Sound(_) | C::SoundEntity(_) | C::StopSound(_))
+        {
+            return None;
+        }
         if matches!(
             &packet,
             C::CookieRequest(_)

@@ -18515,7 +18515,8 @@ impl Game<'_> {
                                         b.width,
                                         b.height,
                                         &self.studio_freecam,
-                                    ) {
+                                    )
+                                {
                                     if del_idx < self.studio_freecam.track.keyframes.len() {
                                         self.studio_freecam.track.keyframes.remove(del_idx);
                                     }
@@ -18615,8 +18616,12 @@ impl Game<'_> {
                                         0.0,
                                         0.0,
                                     ));
-                                    self.studio_freecam
-                                        .activate(pos, yaw, pitch, self.settings.fov);
+                                    self.studio_freecam.activate(
+                                        pos,
+                                        yaw,
+                                        pitch,
+                                        self.settings.fov,
+                                    );
                                     self.capture(true);
                                 }
                                 return Ok(());
@@ -18883,7 +18888,12 @@ impl Game<'_> {
                                             0.0,
                                             0.0,
                                         ));
-                                        self.studio_freecam.activate(pos, yaw, pitch, self.settings.fov);
+                                        self.studio_freecam.activate(
+                                            pos,
+                                            yaw,
+                                            pitch,
+                                            self.settings.fov,
+                                        );
                                     }
                                     self.capture(true);
                                 }
@@ -19328,7 +19338,10 @@ impl Game<'_> {
                         && self.title.is_none()
                         && !self.dialog_open()
                         && self.ui.chat_screen.is_none()
-                        && (self.remote.as_ref().is_some_and(|r| r.session.is_recording())
+                        && (self
+                            .remote
+                            .as_ref()
+                            .is_some_and(|r| r.session.is_recording())
                             || self.studio_replay.is_some())
                     {
                         self.add_studio_marker();
@@ -19365,12 +19378,11 @@ impl Game<'_> {
                         {
                             let active = !self.studio_freecam.active;
                             if active {
-                                let (pos, yaw, pitch) = self.camera_view(0.0).unwrap_or((
-                                    glam::DVec3::ZERO,
-                                    0.0,
-                                    0.0,
-                                ));
-                                self.studio_freecam.activate(pos, yaw, pitch, self.settings.fov);
+                                let (pos, yaw, pitch) =
+                                    self.camera_view(0.0)
+                                        .unwrap_or((glam::DVec3::ZERO, 0.0, 0.0));
+                                self.studio_freecam
+                                    .activate(pos, yaw, pitch, self.settings.fov);
                                 self.capture(true);
                             } else {
                                 self.studio_freecam.deactivate();
@@ -19383,7 +19395,11 @@ impl Game<'_> {
                         if self.studio_key_pressed(key, "key.studio.resetCamera") {
                             let (pos, yaw, pitch) = if let Some(p) = &self.player {
                                 (
-                                    glam::DVec3::new(p.position.x, p.position.y + 1.62, p.position.z),
+                                    glam::DVec3::new(
+                                        p.position.x,
+                                        p.position.y + 1.62,
+                                        p.position.z,
+                                    ),
                                     self.yaw,
                                     self.pitch,
                                 )
@@ -19404,11 +19420,8 @@ impl Game<'_> {
 
                         // 5. K: Add Keyframe
                         if self.studio_key_pressed(key, "key.studio.addKeyframe") {
-                            let time_ms = self
-                                .studio_timeline
-                                .current_time_ms
-                                .min(u32::MAX as u64)
-                                as u32;
+                            let time_ms =
+                                self.studio_timeline.current_time_ms.min(u32::MAX as u64) as u32;
                             let kf = horizon_client::studio::CameraKeyframe::new(
                                 time_ms,
                                 [
@@ -19434,7 +19447,6 @@ impl Game<'_> {
                             self.studio_timeline.selected_keyframe = None;
                             return Ok(());
                         }
-
 
                         // 7. S: Split scene at playhead (when not holding RMB flight look)
                         if self.studio_key_pressed(key, "key.studio.splitScene")

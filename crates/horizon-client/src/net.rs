@@ -307,6 +307,7 @@ impl Session {
             metadata,
             capture_skins,
             capture_names,
+            true,
             None,
             None,
         )
@@ -317,6 +318,7 @@ impl Session {
         metadata: Metadata,
         capture_skins: bool,
         capture_names: bool,
+        capture_sounds: bool,
         mods_json: Option<Vec<u8>>,
         resource_pack: Option<PathBuf>,
     ) -> std::io::Result<()> {
@@ -325,6 +327,7 @@ impl Session {
             metadata,
             capture_skins,
             capture_names,
+            capture_sounds,
             mods_json,
             resource_pack,
         )?;
@@ -2559,4 +2562,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
-

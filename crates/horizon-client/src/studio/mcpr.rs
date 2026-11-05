@@ -10,7 +10,7 @@ use horizon_protocol::buf::{Reader, write_varint};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, BufReader, BufWriter, Read, Write},
+    io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -19,6 +19,8 @@ const MAX_METADATA_BYTES: u64 = 1 << 20;
 /// The most `recording.tmcpr` may inflate to. The reader streams to disk, but
 /// still caps archive expansion to protect disk space from hostile archives.
 const MAX_STREAM_BYTES: u64 = 1 << 30;
+/// Keep one seek anchor for every group of this many packets.
+const STREAM_INDEX_STRIDE: usize = 1024;
 /// How much recording time a stream and its metadata may hold in memory before
 /// both reach disk. A crash costs at most this many milliseconds of packets.
 const FLUSH_INTERVAL_MS: u32 = 1_000;
@@ -96,6 +98,14 @@ pub struct TimestampedPacket {
     pub id: i32,
     /// Unframed packet payload bytes (excluding the VarInt packet ID).
     pub payload: Vec<u8>,
+}
+
+/// User-authored replay timeline bookmark.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Marker {
+    pub time_ms: u32,
+    pub label: String,
 }
 
 impl TimestampedPacket {
@@ -411,6 +421,11 @@ impl McprWriter {
             &self.temp_tmcpr_path,
             self.bytes_written,
             part,
+            Some(ArchiveExtras {
+                markers: &self.markers,
+                mods_json: self.mods_json.as_deref(),
+                resource_pack: self.resource_pack.as_deref(),
+            }),
         )?;
         fs::rename(part, &self.dest_path)
     }
@@ -419,7 +434,19 @@ impl McprWriter {
 /// Package `bytes` of `stream` and `metadata` into the archive at `part`.
 ///
 /// The caller syncs and renames it into place; nothing here touches `stream`.
-fn package_stream(metadata: &Metadata, stream: &Path, bytes: u64, part: &Path) -> io::Result<()> {
+struct ArchiveExtras<'a> {
+    markers: &'a [Marker],
+    mods_json: Option<&'a [u8]>,
+    resource_pack: Option<&'a Path>,
+}
+
+fn package_stream(
+    metadata: &Metadata,
+    stream: &Path,
+    bytes: u64,
+    part: &Path,
+    extras: Option<ArchiveExtras<'_>>,
+) -> io::Result<()> {
     let mut zip = zip::ZipWriter::new(File::create_new(part)?);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
@@ -432,11 +459,41 @@ fn package_stream(metadata: &Metadata, stream: &Path, bytes: u64, part: &Path) -
     // Zip64, so a recording past 4 GiB still finishes.
     zip.start_file("recording.tmcpr", options.large_file(true))?;
     let mut input = BufReader::new(File::open(stream)?).take(bytes);
-    if io::copy(&mut input, &mut zip)? != bytes {
+    let mut checksum = crc32fast::Hasher::new();
+    let mut copied = 0;
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        checksum.update(&buffer[..count]);
+        zip.write_all(&buffer[..count])?;
+        copied += count as u64;
+    }
+    if copied != bytes {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
             "the stream file is shorter than what was written",
         ));
+    }
+    zip.start_file("recording.tmcpr.crc32", options)?;
+    write!(zip, "{:08x}", checksum.finalize())?;
+
+    if let Some(extras) = extras {
+        if !extras.markers.is_empty() {
+            zip.start_file("markers.json", options)?;
+            serde_json::to_writer_pretty(&mut zip, extras.markers).map_err(io::Error::other)?;
+        }
+        if let Some(mods_json) = extras.mods_json {
+            zip.start_file("mods.json", options)?;
+            zip.write_all(mods_json)?;
+        }
+        if let Some(resource_pack) = extras.resource_pack {
+            zip.start_file("resourcepack/resources.zip", options.large_file(true))?;
+            let mut pack = File::open(resource_pack)?;
+            io::copy(&mut pack, &mut zip)?;
+        }
     }
 
     let file = zip.finish().map_err(io::Error::other)?;
@@ -472,19 +529,104 @@ fn frame_head(data: &[u8], offset: usize) -> Option<(u32, usize, usize)> {
     Some((timestamp_ms, length, id_bytes.len() - reader.rest().len()))
 }
 
-/// The frame at `offset`: `(timestamp_ms, id, payload range, next offset)`, or `None` when it
-/// isn't whole (a short header, a length past the end, or an id that doesn't
-/// fit in its length). The index and `next_packet` both read frames through
-/// this, so they agree on where a damaged stream ends.
-fn frame_at(data: &[u8], offset: usize) -> Option<(u32, i32, std::ops::Range<usize>, usize)> {
-    let (timestamp_ms, length, _) = frame_head(data, offset)?;
-    let start = offset + 8;
-    let end = start.checked_add(length)?;
-    let body = data.get(start..end)?;
-    let mut reader = Reader::new(body);
-    let id = reader.varint().ok()?;
-    let payload_start = end - reader.rest().len();
-    Some((timestamp_ms, id, payload_start..end, end))
+/// Byte positions for one complete packet frame in the temporary stream.
+struct FrameLocation {
+    timestamp_ms: u32,
+    id: i32,
+    payload_start: u64,
+    payload_end: u64,
+    next: u64,
+}
+
+/// Read one whole frame from a seekable stream. A partial header/body/ID ends
+/// the readable stream, matching crash recovery's handling of truncated data.
+fn frame_at<R: Read + Seek>(
+    stream: &mut R,
+    offset: u64,
+    end: u64,
+) -> io::Result<Option<FrameLocation>> {
+    if end.saturating_sub(offset) < 8 {
+        return Ok(None);
+    }
+    stream.seek(SeekFrom::Start(offset))?;
+    let mut header = [0; 8];
+    stream.read_exact(&mut header)?;
+    let timestamp_ms = u32::from_be_bytes(header[..4].try_into().unwrap());
+    let length = u32::from_be_bytes(header[4..].try_into().unwrap()) as u64;
+    let body_start = offset + 8;
+    let Some(next) = body_start.checked_add(length) else {
+        return Ok(None);
+    };
+    if length == 0 || next > end {
+        return Ok(None);
+    }
+    let id_bytes_len = length.min(5) as usize;
+    let mut id_bytes = [0; 5];
+    stream.read_exact(&mut id_bytes[..id_bytes_len])?;
+    let mut packet = Reader::new(&id_bytes[..id_bytes_len]);
+    let Ok(id) = packet.varint() else {
+        return Ok(None);
+    };
+    let payload_start = body_start + (id_bytes_len - packet.rest().len()) as u64;
+    stream.seek(SeekFrom::Start(next))?;
+    Ok(Some(FrameLocation {
+        timestamp_ms,
+        id,
+        payload_start,
+        payload_end: next,
+        next,
+    }))
+}
+
+struct SparseIndexEntry {
+    timestamp_ms: u32,
+    frame_offset: u64,
+    group_start: u64,
+}
+
+/// Disk-backed inflated stream removed when the reader closes.
+struct TemporaryStream {
+    path: PathBuf,
+    reader: BufReader<File>,
+}
+
+impl TemporaryStream {
+    fn create() -> io::Result<Self> {
+        let mut last_error = None;
+        for attempt in 0..16 {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_nanos());
+            let path = std::env::temp_dir().join(format!(
+                "horizon-mcpr-{}-{nanos}-{attempt}.tmcpr",
+                std::process::id()
+            ));
+            match OpenOptions::new()
+                .write(true)
+                .read(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => {
+                    return Ok(Self {
+                        path,
+                        reader: BufReader::with_capacity(64 * 1024, file),
+                    });
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    last_error = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(last_error.unwrap_or_else(|| io::Error::other("could not create stream temp file")))
+    }
+}
+
+impl Drop for TemporaryStream {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 /// Reader for opening and streaming `.mcpr` replay files.
@@ -517,6 +659,41 @@ fn read_entry(archive: &mut zip::ZipArchive<File>, name: &str, max: u64) -> io::
         ));
     }
     Ok(bytes)
+}
+
+fn read_optional_entry(
+    archive: &mut zip::ZipArchive<File>,
+    name: &str,
+    max: u64,
+) -> io::Result<Option<Vec<u8>>> {
+    match archive.by_name(name) {
+        Ok(entry) => {
+            let mut bytes = Vec::new();
+            entry.take(max + 1).read_to_end(&mut bytes)?;
+            if bytes.len() as u64 > max {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{name} is larger than {max} bytes"),
+                ));
+            }
+            Ok(Some(bytes))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(error) => Err(io::Error::new(io::ErrorKind::InvalidData, error)),
+    }
+}
+
+fn read_optional_json<T: for<'de> Deserialize<'de>>(
+    archive: &mut zip::ZipArchive<File>,
+    name: &str,
+    max: u64,
+) -> io::Result<Option<T>> {
+    read_optional_entry(archive, name, max)?
+        .map(|bytes| {
+            serde_json::from_slice(&bytes)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+        })
+        .transpose()
 }
 
 impl McprReader {
@@ -612,7 +789,7 @@ impl McprReader {
                 latest = frame.timestamp_ms;
                 group_start = offset;
             }
-            if total_packets % STREAM_INDEX_STRIDE == 0 {
+            if total_packets.is_multiple_of(STREAM_INDEX_STRIDE) {
                 packet_index.push(SparseIndexEntry {
                     timestamp_ms: latest,
                     frame_offset: offset,
@@ -889,7 +1066,7 @@ fn recover_stream(
     metadata.duration = whole.last_timestamp_ms;
     let dest = free_name(dest);
     let part = sibling(&dest, "mcpr.part");
-    if let Err(e) = package_stream(&metadata, stream, whole.bytes, &part) {
+    if let Err(e) = package_stream(&metadata, stream, whole.bytes, &part, None) {
         let _ = fs::remove_file(&part);
         return Err(e);
     }

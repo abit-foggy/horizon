@@ -89,6 +89,7 @@ impl SavedRecordingItem {
 pub enum StudioAction {
     None,
     LoadAndEdit(PathBuf),
+    OpenSettings,
     OpenFolder,
     Refresh,
     Back,

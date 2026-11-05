@@ -679,6 +679,7 @@ impl Game<'_> {
             meta,
             self.settings.studio.record_player_skins,
             self.settings.studio.record_player_names,
+            self.settings.studio.record_sounds,
             mods_json,
             resource_pack,
         ) {
@@ -699,6 +700,17 @@ impl Game<'_> {
             Some(Err(e)) => Ok(json!({ "ok": false, "error": e.to_string() })),
             None => Ok(json!({ "ok": false, "error": "no active recording" })),
         }
+    }
+
+    pub(super) fn add_studio_marker(&mut self) {
+        let time_ms = self.studio_timeline.current_time_ms.min(u32::MAX as u64) as u32;
+        let label = Text::translate("horizon.studio.marker.default", &[]).plain();
+        if let Some(remote) = self.remote.as_ref() {
+            remote.session.record_marker(label.clone());
+        }
+        self.studio_timeline
+            .markers
+            .push(horizon_client::studio::mcpr::Marker { time_ms, label });
     }
 
     pub(super) fn studio_recording_status(&self) -> Value {
