@@ -12,7 +12,7 @@ use horizon_client::{
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 pub const HELP: &[&str] = &[
@@ -34,12 +34,20 @@ pub const HELP: &[&str] = &[
 ];
 
 impl Game<'_> {
+    pub(super) fn studio_key_pressed(&self, key: winit::keyboard::KeyCode, mapping: &str) -> bool {
+        horizon_client::keybinds::key_name(key)
+            .is_some_and(|pressed| self.settings.keys.get(mapping) == pressed)
+    }
+
     /// In-game chat command handler: `/studio <record|replay> ...`.
     /// Returns true if the command was recognized and handled.
     pub(super) fn studio_command(&mut self, command: &str) -> bool {
         let Some(rest) = command.strip_prefix("studio") else {
             return false;
         };
+        if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+            return false;
+        }
         let words: Vec<&str> = rest.split_whitespace().collect();
         if words.is_empty() {
             self.system_message(Text::literal("Studio commands: /studio record <start|stop|status> or /studio replay <open|pause|resume|speed|seek|status|close>"));
@@ -53,32 +61,31 @@ impl Game<'_> {
                     match self.start_studio_recording(name) {
                         Ok(v) if v["ok"].as_bool() == Some(true) => {
                             let path = v["path"].as_str().unwrap_or("recording");
-                            self.system_message(Text::literal(format!(
-                                "Studio: Started recording to {path}"
-                            )));
+                            self.system_message(Text::tr(
+                                "horizon.studio.record.started",
+                                &[&path],
+                            ));
                         }
                         Ok(v) => {
                             let err = v["error"].as_str().unwrap_or("failed to start");
-                            self.system_message(Text::literal(format!("Studio error: {err}")));
+                            self.system_message(Text::tr("horizon.studio.record.error", &[&err]));
                         }
                         Err(e) => {
-                            self.system_message(Text::literal(format!("Studio error: {e}")));
+                            self.system_message(Text::tr("horizon.studio.record.error", &[&e]));
                         }
                     }
                 }
                 Some("stop") => match self.stop_studio_recording() {
                     Ok(v) if v["ok"].as_bool() == Some(true) => {
                         let path = v["path"].as_str().unwrap_or("recording");
-                        self.system_message(Text::literal(format!(
-                            "Studio: Recording saved to {path}"
-                        )));
+                        self.system_message(Text::tr("horizon.studio.record.saved", &[&path]));
                     }
                     Ok(v) => {
                         let err = v["error"].as_str().unwrap_or("failed to stop");
-                        self.system_message(Text::literal(format!("Studio error: {err}")));
+                        self.system_message(Text::tr("horizon.studio.record.error", &[&err]));
                     }
                     Err(e) => {
-                        self.system_message(Text::literal(format!("Studio error: {e}")));
+                        self.system_message(Text::tr("horizon.studio.record.error", &[&e]));
                     }
                 },
                 Some("status") => {
@@ -88,18 +95,24 @@ impl Game<'_> {
                         let elapsed_s = v["elapsed_ms"].as_u64().unwrap_or(0) / 1000;
                         let packets = v["packet_count"].as_u64().unwrap_or(0);
                         let bytes = v["bytes_written"].as_u64().unwrap_or(0);
-                        self.system_message(Text::literal(format!(
-                            "Studio Recording: Active, Time: {elapsed_s}s, Packets: {packets}, Size: {} KB ({path})",
-                            bytes / 1024
-                        )));
+                        let elapsed = elapsed_s.to_string();
+                        let packet_count = packets.to_string();
+                        let size_kb = (bytes / 1024).to_string();
+                        self.system_message(Text::tr(
+                            "horizon.studio.record.status.active",
+                            &[&elapsed, &packet_count, &size_kb, &path],
+                        ));
+                    } else if let Some(error) = v["error"].as_str() {
+                        self.system_message(Text::tr("horizon.studio.record.error", &[&error]));
                     } else {
-                        self.system_message(Text::literal("Studio Recording: Inactive"));
+                        self.system_message(Text::translate(
+                            "horizon.studio.record.status.inactive",
+                            &[],
+                        ));
                     }
                 }
                 _ => {
-                    self.system_message(Text::literal(
-                        "Usage: /studio record <start [name]|stop|status>",
-                    ));
+                    self.system_message(Text::translate("horizon.studio.record.usage", &[]));
                 }
             },
             "replay" => match words.get(1).copied() {
@@ -429,7 +442,11 @@ impl Game<'_> {
             self.tick_player_model();
         }
         if !paused {
-            let speed = self.studio_replay.as_ref().map_or(1.0, |r| r.speed() as f32).max(0.1);
+            let speed = self
+                .studio_replay
+                .as_ref()
+                .map_or(1.0, |r| r.speed() as f32)
+                .max(0.1);
             self.studio_virtual_tick_ms += delta.as_secs_f32() * 1000.0 * speed;
             while self.studio_virtual_tick_ms >= 50.0 {
                 self.studio_virtual_tick_ms -= 50.0;
@@ -460,7 +477,8 @@ impl Game<'_> {
                         let mut target = m.body_yaw;
                         if dx * dx + dz * dz > 0.0025 {
                             let walk = (dz.atan2(dx) as f32).to_degrees() - 90.0;
-                            let facing = ((self.yaw - walk + 180.0).rem_euclid(360.0) - 180.0).abs();
+                            let facing =
+                                ((self.yaw - walk + 180.0).rem_euclid(360.0) - 180.0).abs();
                             target = if 95.0 < facing && facing < 265.0 {
                                 walk - 180.0
                             } else {
@@ -594,28 +612,76 @@ impl Game<'_> {
         if r.session.is_recording() {
             return Ok(json!({ "ok": false, "error": "recording already active" }));
         }
-        let _ = std::fs::create_dir_all("recordings");
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let filename = match name {
-            Some(n) if !n.is_empty() => format!("{}_{}.mcpr", n, ts),
-            _ => format!("recording_{}.mcpr", ts),
-        };
-        let path = PathBuf::from("recordings").join(filename);
-        let server_address = if r.session.address.is_empty() {
-            "local".to_owned()
+        let recordings = PathBuf::from("recordings");
+        std::fs::create_dir_all(&recordings)?;
+        let path = recordings.join(crate::studio::generate_recording_filename(name));
+        let is_singleplayer = r.session.address.is_empty() || r.session.address == "local";
+        let server_name = if is_singleplayer {
+            "Singleplayer World"
         } else {
-            r.session.address.clone()
+            "Multiplayer Server"
         };
-        let is_singleplayer = server_address == "local";
         let meta = Metadata::new(
-            server_address,
+            server_name.into(),
             is_singleplayer,
             horizon_core::release::VERSION.into(),
         );
-        match r.session.start_recording(&path, meta) {
+        let resource_pack = self
+            .settings
+            .studio
+            .include_resource_pack
+            .then(|| {
+                self.server_packs
+                    .active
+                    .iter()
+                    .rev()
+                    .find_map(|pack| match &pack.source {
+                        crate::packs::Source::Zip(path) => Some(path.clone()),
+                        crate::packs::Source::Dir(_) => None,
+                    })
+            })
+            .flatten();
+        let mods_json = self.settings.studio.include_mods_manifest.then(|| {
+            let mut required = Vec::new();
+            let mods_dir = std::env::current_dir()
+                .unwrap_or_default()
+                .join(horizon_client::mod_list::DIR);
+            for path in horizon_mods::find(&mods_dir) {
+                if let Ok(package) = horizon_mods::Package::read(&path)
+                    && self.settings.mods.enabled.contains(&package.manifest.id)
+                {
+                    required.push(json!({
+                        "id": package.manifest.id,
+                        "version": package.manifest.version,
+                    }));
+                }
+            }
+            if let Some(built_mods) = std::env::current_exe()
+                .ok()
+                .and_then(|exe| {
+                    std::fs::read_to_string(exe.with_file_name("native-mods.json")).ok()
+                })
+                .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                .and_then(|info| info["mods"].as_array().cloned())
+            {
+                for module in built_mods {
+                    if let (Some(id), Some(version)) =
+                        (module["id"].as_str(), module["version"].as_str())
+                    {
+                        required.push(json!({ "id": id, "version": version }));
+                    }
+                }
+            }
+            serde_json::to_vec(&json!({ "requiredMods": required })).unwrap_or_default()
+        });
+        match r.session.start_recording_with_archive_options(
+            &path,
+            meta,
+            self.settings.studio.record_player_skins,
+            self.settings.studio.record_player_names,
+            mods_json,
+            resource_pack,
+        ) {
             Ok(()) => {
                 self.dump_world_snapshot_to_recorder();
                 Ok(json!({ "ok": true, "path": path.display().to_string() }))
@@ -646,9 +712,10 @@ impl Game<'_> {
                 "elapsed_ms": status.elapsed.as_millis(),
                 "packet_count": status.packet_count,
                 "bytes_written": status.bytes_written,
+                "error": status.error,
             })
         } else {
-            json!({ "ok": true, "active": false })
+            json!({ "ok": true, "active": false, "error": null })
         }
     }
 
@@ -662,7 +729,19 @@ impl Game<'_> {
             Ok(driver) => {
                 let duration_ms = driver.duration_ms();
                 let packets = driver.packet_count();
+                if let Some(filename) = Path::new(path).file_name() {
+                    let sidecar = horizon_client::logging::player_dir()
+                        .join("studio-appearances")
+                        .join(format!("{}.json", filename.to_string_lossy()));
+                    if let Ok(bytes) = std::fs::read(sidecar)
+                        && let Ok(appearances) =
+                            serde_json::from_slice::<Vec<crate::studio::StoredAppearance>>(&bytes)
+                    {
+                        self.restore_studio_appearances(&appearances);
+                    }
+                }
                 self.studio_timeline.duration_ms = duration_ms as u64;
+                self.studio_timeline.markers = driver.markers().to_vec();
                 self.studio_timeline.current_time_ms = 0;
                 self.studio_timeline.visible = true;
                 self.studio_timeline.selected_keyframe = None;
@@ -713,6 +792,7 @@ impl Game<'_> {
         self.studio_freecam.track.keyframes.clear();
         self.studio_freecam.locked_to_path = false;
         self.studio_timeline.selected_keyframe = None;
+        self.studio_timeline.markers.clear();
         self.studio_topbar.close_dropdown();
         self.studio_timeline.visible = false;
         self.studio_visuals.open = false;
@@ -754,8 +834,8 @@ impl Game<'_> {
                 hardcore: self.level.hardcore,
                 levels: vec!["minecraft:overworld".into()],
                 max_players: 20,
-                chunk_radius: self.settings.render_distance as i32,
-                simulation_distance: self.settings.simulation_distance as i32,
+                chunk_radius: self.settings.render_distance,
+                simulation_distance: self.settings.simulation_distance,
                 reduced_debug_info: false,
                 show_death_screen: true,
                 limited_crafting: false,

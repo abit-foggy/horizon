@@ -5,6 +5,7 @@
 
 use super::mcpr::{McprWriter, Metadata, TimestampedPacket};
 use std::{
+    collections::HashMap,
     io,
     path::{Path, PathBuf},
     sync::{
@@ -21,6 +22,7 @@ static RECORDING_NAME_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic
 /// Commands sent to the background recording thread.
 enum RecordCommand {
     Packet(TimestampedPacket),
+    Marker(u32, String),
     Stop,
 }
 
@@ -47,11 +49,42 @@ pub struct StudioRecorder {
     worker: Option<JoinHandle<io::Result<PathBuf>>>,
     start_time: Instant,
     dest_path: PathBuf,
+    appearance_capture: (bool, bool),
+    anonymous_ids: std::sync::Mutex<HashMap<u128, u128>>,
+    appearances: std::sync::Mutex<HashMap<u128, StoredAppearance>>,
 }
 
 impl StudioRecorder {
     /// Start a new recording session saving to `dest_path`.
-    pub fn start(dest_path: PathBuf, mut metadata: Metadata) -> io::Result<Self> {
+    pub fn start(dest_path: PathBuf, metadata: Metadata) -> io::Result<Self> {
+        Self::start_with_appearances(dest_path, metadata, false, false)
+    }
+
+    /// Start a recording with optional local-only appearance capture.
+    pub fn start_with_appearances(
+        dest_path: PathBuf,
+        metadata: Metadata,
+        capture_skins: bool,
+        capture_names: bool,
+    ) -> io::Result<Self> {
+        Self::start_with_archive_options(
+            dest_path,
+            metadata,
+            capture_skins,
+            capture_names,
+            None,
+            None,
+        )
+    }
+
+    pub fn start_with_archive_options(
+        dest_path: PathBuf,
+        mut metadata: Metadata,
+        capture_skins: bool,
+        capture_names: bool,
+        mods_json: Option<Vec<u8>>,
+        resource_pack: Option<PathBuf>,
+    ) -> io::Result<Self> {
         let active = Arc::new(AtomicBool::new(true));
         let packet_count = Arc::new(AtomicU64::new(0));
         let bytes_written = Arc::new(AtomicU64::new(0));
@@ -66,6 +99,8 @@ impl StudioRecorder {
         let (sender, receiver): (SyncSender<RecordCommand>, Receiver<RecordCommand>) =
             sync_channel(RECORD_QUEUE_PACKETS);
         let mut writer = McprWriter::new(dest_path.clone(), metadata)?;
+        writer.set_mods_json(mods_json);
+        writer.set_resource_pack(resource_pack);
 
         let worker_active = active.clone();
         let worker_count = packet_count.clone();
@@ -92,6 +127,7 @@ impl StudioRecorder {
                             worker_count.fetch_add(1, Ordering::Relaxed);
                             worker_bytes.store(writer.bytes_written(), Ordering::Relaxed);
                         }
+                        RecordCommand::Marker(time_ms, label) => writer.add_marker(time_ms, label),
                         RecordCommand::Stop => break,
                     }
                 }
@@ -128,12 +164,95 @@ impl StudioRecorder {
             worker: Some(worker),
             start_time,
             dest_path,
+            appearance_capture: (capture_skins, capture_names),
+            anonymous_ids: std::sync::Mutex::new(HashMap::new()),
+            appearances: std::sync::Mutex::new(HashMap::new()),
         })
+    }
+
+    /// A stable random UUID for a real profile, used only in the `.mcpr` stream.
+    pub fn anonymous_uuid(&self, real: u128) -> u128 {
+        let mut anonymous_ids = self.anonymous_ids.lock().unwrap();
+        if let Some(id) = anonymous_ids.get(&real) {
+            return *id;
+        }
+        let mut bytes = [0; 16];
+        if horizon_protocol::crypto::random_bytes(&mut bytes).is_err() {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let mut seed = real.to_be_bytes().to_vec();
+            seed.extend_from_slice(&nonce.to_be_bytes());
+            bytes.copy_from_slice(&horizon_client::skins::sha1(&seed)[..16]);
+        }
+        let mut id = u128::from_be_bytes(bytes);
+        while anonymous_ids.values().any(|known| *known == id) || id == real {
+            id = id.wrapping_add(1);
+        }
+        anonymous_ids.insert(real, id);
+        id
+    }
+
+    /// Retain the first resolved local appearance for an entity; updates are
+    /// accepted when its skin or cape changes during a session.
+    pub fn record_appearance(
+        &self,
+        real: u128,
+        name: Option<&str>,
+        slim: bool,
+        skin_rgba: Option<&[u8]>,
+        cape_rgba: Option<&[u8]>,
+    ) {
+        if !self.appearance_capture.0 && !self.appearance_capture.1 {
+            return;
+        }
+        let uuid = self.anonymous_uuid(real);
+        let mut appearances = self.appearances.lock().unwrap();
+        let previous = appearances.get(&uuid);
+        if previous.is_some_and(|old| {
+            old.name.as_deref() == self.appearance_capture.1.then_some(name).flatten()
+                && old.slim == (self.appearance_capture.0 && slim)
+                && old.skin_rgba.as_deref()
+                    == self.appearance_capture.0.then_some(skin_rgba).flatten()
+                && old.cape_rgba.as_deref()
+                    == self.appearance_capture.0.then_some(cape_rgba).flatten()
+        }) {
+            return;
+        }
+        let name = self
+            .appearance_capture
+            .1
+            .then_some(name)
+            .flatten()
+            .map(str::to_owned);
+        let skin_rgba = self
+            .appearance_capture
+            .0
+            .then_some(skin_rgba)
+            .flatten()
+            .map(<[u8]>::to_vec);
+        let cape_rgba = self
+            .appearance_capture
+            .0
+            .then_some(cape_rgba)
+            .flatten()
+            .map(<[u8]>::to_vec);
+        appearances.insert(
+            uuid,
+            StoredAppearance {
+                uuid,
+                name,
+                slim: self.appearance_capture.0 && slim,
+                skin_rgba,
+                cape_rgba,
+            },
+        );
     }
 
     /// Record a clientbound packet if recording is active.
     pub fn record_packet(&self, id: i32, payload: &[u8]) {
-        if !self.active.load(Ordering::Relaxed) {
+        let Some((id, payload)) = self.sanitized_packet(id, payload) else {
             return;
         }
         let timestamp_ms = self.start_time.elapsed().as_millis() as u32;
@@ -164,13 +283,95 @@ impl StudioRecorder {
         }
     }
 
-    /// Record a clientbound packet at an explicit timestamp (e.g. 0ms for initial world baseline).
+    /// Record a packet at a supplied timestamp after applying the privacy filter.
     pub fn record_packet_at(&self, timestamp_ms: u32, id: i32, payload: &[u8]) {
+        let Some((id, payload)) = self.sanitized_packet(id, payload) else {
+            return;
+        };
+        self.queue_packet(id, &payload, Some(timestamp_ms));
+    }
+
+    /// Add a user-created timeline marker at the current recording time.
+    pub fn record_marker(&self, label: String) {
+        if self.is_active() {
+            let time_ms = self.start_time.elapsed().as_millis().min(u32::MAX as u128) as u32;
+            let _ = self.sender.try_send(RecordCommand::Marker(time_ms, label));
+        }
+    }
+
+    fn sanitized_packet(&self, id: i32, payload: &[u8]) -> Option<(i32, Vec<u8>)> {
+        use horizon_protocol::packets::play::Clientbound as C;
+        let Ok(mut packet) = C::decode(id, payload) else {
+            // The live network path records only packets that decoded above;
+            // retain opaque packets from explicit snapshot callers unchanged.
+            return Some((id, payload.to_vec()));
+        };
+        if matches!(
+            &packet,
+            C::CookieRequest(_)
+                | C::CustomPayload(_)
+                | C::DisguisedChat(_)
+                | C::PlayerChat(_)
+                | C::PlayerInfoRemove(_)
+                | C::PlayerInfoUpdate(_)
+                | C::PlayerCombatKill(_)
+                | C::ResourcePackPush(_)
+                | C::ResetScore(_)
+                | C::ServerLinks(_)
+                | C::SetPlayerTeam(_)
+                | C::SetScore(_)
+                | C::StoreCookie(_)
+                | C::SystemChat(_)
+                | C::TabList(_)
+                | C::Transfer(_)
+        ) {
+            return None;
+        }
+        if let C::SetEntityData(data) = &mut packet {
+            // Keep only the shared entity flags and pose. These carry visible
+            // movement (including crouching and swimming) without recording
+            // custom names, profiles, items, or other identifying metadata.
+            data.values.retain(|(index, serializer, value)| {
+                matches!(
+                    (*index, *serializer, value),
+                    (
+                        0,
+                        horizon_protocol::entity_data::serializer::BYTE,
+                        horizon_protocol::entity_data::Value::Byte(_)
+                    ) | (
+                        6,
+                        horizon_protocol::entity_data::serializer::POSE,
+                        horizon_protocol::entity_data::Value::Id(_)
+                    )
+                )
+            });
+            if data.values.is_empty() {
+                return None;
+            }
+        }
+        if let C::AddEntity(entity) = &mut packet {
+            entity.uuid = self.anonymous_uuid(entity.uuid);
+        }
+        let encoded = packet.encode();
+        let mut reader = horizon_protocol::buf::Reader::new(&encoded);
+        let packet_id = reader.varint().ok()?;
+        Some((packet_id, reader.rest().to_vec()))
+    }
+
+    fn queue_packet(&self, id: i32, payload: &[u8], at: Option<u32>) {
         if !self.active.load(Ordering::Relaxed) {
             return;
         }
+        let timestamp_ms = at.unwrap_or_else(|| self.start_time.elapsed().as_millis() as u32);
         let pkt = TimestampedPacket::new(timestamp_ms, id, payload.to_vec());
-        let _ = self.sender.send(RecordCommand::Packet(pkt));
+        if let Err(error) = self.sender.try_send(RecordCommand::Packet(pkt)) {
+            let message = match error {
+                TrySendError::Full(_) => "recorder queue is full; capture stopped",
+                TrySendError::Disconnected(_) => "recorder worker stopped unexpectedly",
+            };
+            *self.failure.lock().unwrap() = Some(message.into());
+            self.active.store(false, Ordering::SeqCst);
+        }
     }
 
     /// Check if currently recording.
@@ -194,14 +395,25 @@ impl StudioRecorder {
     pub fn stop(mut self) -> io::Result<PathBuf> {
         self.active.store(false, Ordering::SeqCst);
         let _ = self.sender.send(RecordCommand::Stop);
-        if let Some(worker) = self.worker.take() {
+        let result = if let Some(worker) = self.worker.take() {
             match worker.join() {
                 Ok(res) => res,
                 Err(_) => Err(io::Error::other("studio recorder worker thread panicked")),
             }
         } else {
             Ok(self.dest_path.clone())
+        }?;
+        let appearances = self.appearances.lock().unwrap();
+        if !appearances.is_empty() {
+            let local_root = horizon_client::logging::player_dir().join("studio-appearances");
+            std::fs::create_dir_all(&local_root)?;
+            let stem = self.dest_path.file_name().unwrap_or_default();
+            let sidecar = local_root.join(format!("{}.json", stem.to_string_lossy()));
+            let bytes = serde_json::to_vec(&appearances.values().collect::<Vec<_>>())
+                .map_err(io::Error::other)?;
+            std::fs::write(sidecar, bytes)?;
         }
+        Ok(result)
     }
 }
 

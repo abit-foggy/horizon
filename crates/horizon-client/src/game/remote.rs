@@ -1205,7 +1205,7 @@ impl Game<'_> {
         let lang = Arc::new(horizon_client::net::load_language(&root));
         let info = self
             .settings
-            .client_information(client_view_distance(self.render_distance_in_use()));
+            .client_information(client_view_distance(self.settings.render_distance));
         let auth = self.auth();
         let name = auth.as_ref().map_or("ReplayPlayer", |a| a.name.as_str());
         let user = auth.as_ref().map_or_else(
@@ -1226,7 +1226,7 @@ impl Game<'_> {
             self.res.threads(),
         );
         streaming.remote = true;
-        streaming.radius = self.render_distance_in_use();
+        streaming.radius = self.settings.render_distance;
         self.streaming = streaming;
         self.world = World::new(self.res.facts().air, 0);
         self.save = Arc::new(SaveDir::new(
@@ -1295,6 +1295,7 @@ impl Game<'_> {
             reconfiguring: None,
             logged_in: true,
             entity_id: 0,
+            local_entity_silent: false,
             camera: None,
             use_item: None,
             dimension: DimensionType::vanilla("minecraft:overworld"),
@@ -1325,6 +1326,7 @@ impl Game<'_> {
             menu: None,
             craft_result: None,
             menu_title: None,
+            menu_extra: None,
             state_id: 0,
             use_target: None,
             entities: HashMap::new(),
@@ -1383,6 +1385,7 @@ impl Game<'_> {
             flat: false,
             death_message: None,
             show_death_screen: true,
+            reduced_debug_info: false,
             do_limited_crafting: false,
             player_type,
             synced: vec![None; CREATIVE_SYNCED],
@@ -5581,18 +5584,20 @@ impl Game<'_> {
     pub(super) fn update_remote_skins(&mut self) {
         let local = self.remote.as_ref().map(|r| r.profile);
         self.poll_own_profile();
-        let Some(r) = self.remote.as_mut() else {
+        let Some((local, mut entries, own)) = self.remote.as_mut().map(|r| {
+            let local = local.unwrap_or(r.profile);
+            let entries = skin_entries(
+                &r.level_players,
+                &r.skin_textures,
+                &mut r.level_player_textures,
+            );
+            let own = match &r.own_profile {
+                OwnProfile::Done(Some(t)) => Some(t.clone()),
+                _ => None,
+            };
+            (local, entries, own)
+        }) else {
             return;
-        };
-        let local = local.unwrap_or(r.profile);
-        let mut entries = skin_entries(
-            &r.level_players,
-            &r.skin_textures,
-            &mut r.level_player_textures,
-        );
-        let own = match &r.own_profile {
-            OwnProfile::Done(Some(t)) => Some(t.clone()),
-            _ => None,
         };
         // Minecraft.profileFuture: the signed-in account's active skin and cape
         // from `/minecraft/profile` when the server sent none (single player) or
@@ -5660,6 +5665,39 @@ impl Game<'_> {
                 self.store_skin(OFFLINE.into(), rgba.to_vec());
             }
             capes.insert(local, OFFLINE.into());
+        }
+        let remote = self.remote.as_ref();
+        if remote.is_some_and(|r| r.session.is_recording()) {
+            let downloads = self.skin_downloads.borrow();
+            let players: Vec<(u128, Option<String>)> = remote
+                .map(|r| {
+                    r.level_players
+                        .values()
+                        .copied()
+                        .collect::<std::collections::HashSet<_>>()
+                        .into_iter()
+                        .map(|uuid| (uuid, r.players.get(&uuid).cloned()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for (uuid, name) in players {
+                let skin_rgba = resolved
+                    .iter()
+                    .find(|(player, _)| *player == uuid)
+                    .and_then(|(_, location)| downloads.image(location));
+                let cape_rgba = capes
+                    .get(&uuid)
+                    .and_then(|location| downloads.image(location));
+                if let Some(r) = remote {
+                    r.session.record_appearance(
+                        uuid,
+                        name.as_deref(),
+                        slim.contains(&uuid),
+                        skin_rgba,
+                        cape_rgba,
+                    );
+                }
+            }
         }
         // PlayerInfo.getSkin: the downloaded skin and its model, else the
         // profile's default skin (DefaultPlayerSkin.get), slim or wide.
@@ -5791,6 +5829,44 @@ impl Game<'_> {
                 mob.slim = slim && skin.is_some();
                 mob.skin = skin;
             }
+        }
+    }
+
+    /// Restore only the explicitly captured, local-only appearance sidecar for a replay.
+    pub(super) fn restore_studio_appearances(
+        &mut self,
+        appearances: &[crate::studio::StoredAppearance],
+    ) {
+        let mut restored = Vec::with_capacity(appearances.len());
+        {
+            let mut downloads = self.skin_downloads.borrow_mut();
+            for appearance in appearances {
+                let skin = appearance.skin_rgba.as_deref().map(|rgba| {
+                    downloads.remember_studio_texture(horizon_client::skins::Kind::Skin, rgba)
+                });
+                let cape = appearance.cape_rgba.as_deref().map(|rgba| {
+                    downloads.remember_studio_texture(horizon_client::skins::Kind::Cape, rgba)
+                });
+                restored.push((appearance, skin, cape));
+            }
+        }
+        let Some(remote) = self.remote.as_mut() else {
+            return;
+        };
+        for (appearance, skin, cape) in restored {
+            if let Some(name) = &appearance.name {
+                remote.players.insert(appearance.uuid, name.clone());
+            }
+            remote.skin_textures.insert(
+                appearance.uuid,
+                horizon_client::skins::Textures {
+                    skin,
+                    slim: appearance.slim,
+                    cape,
+                    elytra: None,
+                    signed: true,
+                },
+            );
         }
     }
     /// Puts a downloaded skin in an atlas skin slot (`SkinSlots::place`),
@@ -7533,7 +7609,7 @@ impl Game<'_> {
                 r.was_shared_flags = shared;
                 r.was_living_flags = living_flags;
                 r.last_recorded_pose = Some(p.pose);
-                use horizon_protocol::entity_data::{serializer, Value};
+                use horizon_protocol::entity_data::{Value, serializer};
                 let pkt = horizon_protocol::packets::play::Clientbound::SetEntityData(
                     horizon_protocol::packets::play::SetEntityData {
                         id: r.entity_id,

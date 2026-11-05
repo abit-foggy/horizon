@@ -1282,6 +1282,8 @@ pub enum Page {
     Horizon,
     /// Replay Studio: saved recordings browser and 3D video editor launcher.
     Studio,
+    /// Settings for recordings and local Studio appearance capture.
+    StudioSettings,
     /// AI Agent: agent control on or off, whether an agent is connected, the connection details.
     Agent,
     /// SkinCustomizationScreen: the skin layers and Main Hand.
@@ -1613,6 +1615,7 @@ pub struct OptionsUi {
     pub calibration_fullscreen: Option<bool>,
     pub split_setup: crate::split_ui::SplitUi,
     pub studio: crate::studio_ui::StudioUi,
+    pub studio_settings: crate::studio_ui::StudioSettingsUi,
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
     /// A repro recording is running: the AI Agent page's button says stop.
@@ -1681,6 +1684,7 @@ impl Default for OptionsUi {
             calibration_fullscreen: None,
             split_setup: Default::default(),
             studio: Default::default(),
+            studio_settings: Default::default(),
             agent_status: Vec::new(),
             agent_recording: false,
             music_groups: Vec::new(),
@@ -1747,6 +1751,7 @@ fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
     Some(match page {
         Page::Horizon => "horizon.pages.settings.tooltip",
         Page::Studio => "horizon.pages.studio.tooltip",
+        Page::StudioSettings => "horizon.studio.settings.tooltip",
         Page::Graphics => "horizon.pages.graphics.tooltip",
         Page::GraphicsAdvanced => "horizon.pages.graphics_advanced.tooltip",
         Page::Controller => "horizon.pages.controller.tooltip",
@@ -2366,6 +2371,7 @@ impl OptionsUi {
             Page::Credits => "credits_and_attribution.screen.title",
             Page::Horizon => "horizon.pages.settings",
             Page::Studio => "horizon.pages.studio",
+            Page::StudioSettings => "horizon.studio.settings.title",
             Page::Agent => "horizon.pages.agent",
             Page::SplitProfiles => "horizon.pages.split_profiles",
             Page::SplitSetup => "horizon.pages.split_setup",
@@ -3685,6 +3691,11 @@ impl OptionsUi {
             self.studio.draw(batch, atlas, cursor, self.in_world);
             return;
         }
+        if self.page() == Page::StudioSettings {
+            self.studio_settings
+                .draw(batch, atlas, cursor, self.in_world, &s.studio);
+            return;
+        }
         if self.page() == Page::Packs {
             self.watch_data_packs(atlas, (w, h));
             ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
@@ -4079,9 +4090,47 @@ impl OptionsUi {
             use crate::studio_ui::StudioAction;
             return match self.studio.click((x, y), size) {
                 StudioAction::None => Vec::new(),
+                StudioAction::OpenSettings => {
+                    self.push(Page::StudioSettings);
+                    vec![Event::ButtonClick]
+                }
                 StudioAction::Refresh => vec![Event::ButtonClick],
                 StudioAction::OpenFolder => vec![Event::ButtonClick, Event::OpenStudioFolder],
                 StudioAction::Back => {
+                    let mut events = vec![Event::ButtonClick];
+                    events.extend(self.back(s));
+                    events
+                }
+            };
+        }
+        if self.page() == Page::StudioSettings {
+            if right || drag {
+                return Vec::new();
+            }
+            use crate::studio_ui::StudioSettingsAction;
+            return match self.studio_settings.click((x, y), size) {
+                StudioSettingsAction::None => Vec::new(),
+                StudioSettingsAction::ToggleSounds => {
+                    s.studio.record_sounds = !s.studio.record_sounds;
+                    vec![Event::ButtonClick, Event::Changed]
+                }
+                StudioSettingsAction::ToggleSkins => {
+                    s.studio.record_player_skins = !s.studio.record_player_skins;
+                    vec![Event::ButtonClick, Event::Changed]
+                }
+                StudioSettingsAction::ToggleNames => {
+                    s.studio.record_player_names = !s.studio.record_player_names;
+                    vec![Event::ButtonClick, Event::Changed]
+                }
+                StudioSettingsAction::ToggleModsManifest => {
+                    s.studio.include_mods_manifest = !s.studio.include_mods_manifest;
+                    vec![Event::ButtonClick, Event::Changed]
+                }
+                StudioSettingsAction::ToggleResourcePack => {
+                    s.studio.include_resource_pack = !s.studio.include_resource_pack;
+                    vec![Event::ButtonClick, Event::Changed]
+                }
+                StudioSettingsAction::Back => {
                     let mut events = vec![Event::ButtonClick];
                     events.extend(self.back(s));
                     events
@@ -4590,6 +4639,9 @@ impl OptionsUi {
         }
         if self.page() == Page::Studio {
             self.studio.wheel(amount);
+            return Vec::new();
+        }
+        if self.page() == Page::StudioSettings {
             return Vec::new();
         }
         let plain = self.resource_error.is_none()
@@ -7678,6 +7730,7 @@ mod tests {
                 Page::SplitSetup,
                 Page::Pvp,
                 Page::Studio,
+                Page::StudioSettings,
                 Page::Agent,
             ]
         );

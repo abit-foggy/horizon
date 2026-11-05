@@ -73,13 +73,27 @@ pub const MAPPINGS: &[(&str, &str, &str)] = &[
     ("key.debug.networkCharts", "key.keyboard.3", "debug"),
     ("key.debug.lightmapTexture", "key.keyboard.4", "debug"),
     ("key.debug.improvedTransparency", "key.keyboard.x", "debug"),
+    ("key.studio.export", "key.keyboard.e", "studio"),
+    ("key.studio.pauseMenu", "key.keyboard.p", "studio"),
+    ("key.studio.toggleFreecam", "key.keyboard.f", "studio"),
+    ("key.studio.resetCamera", "key.keyboard.home", "studio"),
+    ("key.studio.togglePathLock", "key.keyboard.l", "studio"),
+    ("key.studio.addKeyframe", "key.keyboard.k", "studio"),
+    ("key.studio.removeKeyframe", "key.keyboard.delete", "studio"),
+    ("key.studio.splitScene", "key.keyboard.s", "studio"),
+    ("key.studio.cycleGuides", "key.keyboard.g", "studio"),
+    ("key.studio.cycleAspectRatio", "key.keyboard.a", "studio"),
+    ("key.studio.toggleVisuals", "key.keyboard.v", "studio"),
+    ("key.studio.toggleTimeline", "key.keyboard.t", "studio"),
+    ("key.studio.addMarker", "key.keyboard.m", "studio"),
+    ("key.studio.exit", "key.keyboard.escape", "studio"),
 ];
 /// Mappings Options builds as `ToggleKeyMapping` (hold or toggle by option).
 pub fn is_toggle(name: &str) -> bool {
     matches!(name, "key.sneak" | "key.sprint" | "key.use" | "key.attack")
 }
 /// KeyMapping.Category sort order.
-pub const CATEGORIES: [&str; 8] = [
+pub const CATEGORIES: [&str; 9] = [
     "movement",
     "misc",
     "multiplayer",
@@ -87,6 +101,7 @@ pub const CATEGORIES: [&str; 8] = [
     "inventory",
     "creative",
     "spectator",
+    "studio",
     "debug",
 ];
 
@@ -395,7 +410,7 @@ impl KeyBinds {
     fn translated_mappings<'a>(&'a self, key: &'a str) -> impl Iterator<Item = &'static str> + 'a {
         MAPPINGS
             .iter()
-            .filter(|m| m.2 != "debug")
+            .filter(|m| m.2 != "debug" && m.2 != "studio")
             .map(|m| m.0)
             .filter(move |n| self.get(n) == key)
     }
@@ -404,7 +419,7 @@ impl KeyBinds {
     fn default_moved(&self, key: &str) -> bool {
         MAPPINGS
             .iter()
-            .any(|(n, d, c)| *d == key && *c != "debug" && !self.is_default(n))
+            .any(|(n, d, c)| *d == key && *c != "debug" && *c != "studio" && !self.is_default(n))
     }
     /// Translate a physical key into the default key of the mapping it is
     /// bound to, so game code written against vanilla defaults follows the
@@ -503,6 +518,19 @@ impl KeyBinds {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn studio_bindings_are_configurable_and_do_not_remap_gameplay_keys() {
+        let mut keys = KeyBinds::default();
+        assert_eq!(
+            KeyBinds::default_of("key.studio.addMarker"),
+            "key.keyboard.m"
+        );
+        keys.set("key.studio.addMarker", "key.keyboard.z");
+        assert_eq!(keys.get("key.studio.addMarker"), "key.keyboard.z");
+        assert_eq!(keys.translate_all(KeyCode::KeyZ), [Ok(KeyCode::KeyZ)]);
+        assert_eq!(keys.translate_all(KeyCode::KeyM), [Ok(KeyCode::KeyM)]);
+    }
+
     #[test]
     fn container_mouse_hotkeys_follow_slot_bindings_and_pick_item_priority() {
         for button in [MouseButton::Back, MouseButton::Forward, MouseButton::Middle] {

@@ -197,6 +197,8 @@ pub struct Settings {
     pub controller: crate::gamepad::PadSettings,
     /// Horizon's optional extras (`horizon-extras.txt`), all off by default.
     pub extras: crate::extras::Extras,
+    /// Privacy and local appearance capture for the Studio recorder.
+    pub studio: crate::studio_preferences::StudioPreferences,
     /// The Horizon mods turned on (`horizon-mods.txt`), all off by default.
     pub mods: crate::mod_list::ModList,
     /// The packs in `shaderpacks/`, listed when the Shader Packs page opens; the pick is
@@ -285,6 +287,7 @@ impl Default for Settings {
             video_modes: Vec::new(),
             controller: Default::default(),
             extras: Default::default(),
+            studio: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
             shader_options: None,
@@ -341,6 +344,10 @@ impl Settings {
             .parent()
             .and_then(|dir| fs::read_to_string(dir.join(crate::extras::FILE)).ok())
             .unwrap_or_default();
+        let studio = path
+            .parent()
+            .map(crate::studio_preferences::StudioPreferences::load)
+            .unwrap_or_default();
         let mut extras = crate::extras::Extras::parse(&extras_text);
         // The enabled mods are the game folder's, shared by its players (`--player-dir`).
         let mods = path
@@ -355,6 +362,7 @@ impl Settings {
                     horizon,
                     controller,
                     extras,
+                    studio,
                     mods,
                     ..Self::parse(&text)
                 }
@@ -363,6 +371,7 @@ impl Settings {
                 horizon,
                 controller,
                 extras,
+                studio,
                 mods,
                 ..Self::default()
             },
@@ -475,6 +484,7 @@ impl Settings {
             video_modes: Vec::new(),
             controller: Default::default(),
             extras: Default::default(),
+            studio: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
             shader_options: None,
@@ -640,6 +650,7 @@ impl Settings {
             horizon: self.horizon.clone(),
             controller: self.controller.clone(),
             extras: self.extras.clone(),
+            studio: self.studio.clone(),
             mods: self.mods.clone(),
             video_modes: self.video_modes.clone(),
             ..Self::from_file(file)
@@ -658,6 +669,7 @@ impl Settings {
             self.horizon.save(dir);
             self.controller.save(dir);
             self.extras.save(dir);
+            self.studio.save(dir);
             self.mods.save(&crate::logging::shared_dir(dir));
         }
     }

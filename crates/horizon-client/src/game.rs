@@ -9141,6 +9141,7 @@ impl Game<'_> {
                 self.studio_replay.as_ref(),
                 rec_name,
                 self.studio_freecam.locked_to_path,
+                &self.settings.keys,
             );
         }
         batch
@@ -18508,19 +18509,18 @@ impl Game<'_> {
                             if self.studio_timeline.visible
                                 && self.cursor.1 >= b.height - self.studio_timeline.height()
                             {
-                                if pressed {
-                                    if let Some(del_idx) = self.studio_timeline.keyframe_at_cursor(
+                                if pressed
+                                    && let Some(del_idx) = self.studio_timeline.keyframe_at_cursor(
                                         self.cursor,
                                         b.width,
                                         b.height,
                                         &self.studio_freecam,
                                     ) {
-                                        if del_idx < self.studio_freecam.track.keyframes.len() {
-                                            self.studio_freecam.track.keyframes.remove(del_idx);
-                                        }
-                                        self.studio_timeline.selected_keyframe = None;
-                                        return Ok(());
+                                    if del_idx < self.studio_freecam.track.keyframes.len() {
+                                        self.studio_freecam.track.keyframes.remove(del_idx);
                                     }
+                                    self.studio_timeline.selected_keyframe = None;
+                                    return Ok(());
                                 }
                                 return Ok(());
                             }
@@ -18553,6 +18553,14 @@ impl Game<'_> {
                             self.studio_topbar
                                 .handle_mouse_click(self.cursor, b.width, b.height);
                         match topbar_action {
+                            horizon_client::studio::TopBarAction::OpenStudioSettings => {
+                                self.open_options_at(
+                                    false,
+                                    horizon_client_render::options_ui::Page::StudioSettings,
+                                );
+                                self.options_to_game = true;
+                                return Ok(());
+                            }
                             horizon_client::studio::TopBarAction::OpenPauseMenu => {
                                 self.pause_focus = None;
                                 self.screen = Screen::Paused;
@@ -18597,6 +18605,22 @@ impl Game<'_> {
                                     !self.studio_freecam.locked_to_path;
                                 return Ok(());
                             }
+                            horizon_client::studio::TopBarAction::ToggleFreecam => {
+                                if self.studio_freecam.active {
+                                    self.studio_freecam.deactivate();
+                                    self.capture(false);
+                                } else {
+                                    let (pos, yaw, pitch) = self.camera_view(0.0).unwrap_or((
+                                        glam::DVec3::ZERO,
+                                        0.0,
+                                        0.0,
+                                    ));
+                                    self.studio_freecam
+                                        .activate(pos, yaw, pitch, self.settings.fov);
+                                    self.capture(true);
+                                }
+                                return Ok(());
+                            }
                             horizon_client::studio::TopBarAction::AddKeyframe => {
                                 let time_ms =
                                     self.studio_timeline.current_time_ms.min(u32::MAX as u64)
@@ -18613,6 +18637,10 @@ impl Game<'_> {
                                     self.studio_freecam.fov,
                                 );
                                 self.studio_freecam.track.insert(kf);
+                                return Ok(());
+                            }
+                            horizon_client::studio::TopBarAction::AddMarker => {
+                                self.add_studio_marker();
                                 return Ok(());
                             }
                             horizon_client::studio::TopBarAction::ClearKeyframes => {
@@ -19268,6 +19296,45 @@ impl Game<'_> {
                     };
                     self.native_key_event(key, event.state == ElementState::Pressed, event.repeat);
 
+                    if event.state == ElementState::Pressed
+                        && !event.repeat
+                        && self.screen == Screen::Playing
+                        && self.title.is_none()
+                        && !self.dialog_open()
+                        && self.ui.chat_screen.is_none()
+                        && (self.studio_freecam.active || self.studio_replay.is_some())
+                        && self.studio_key_pressed(key, "key.studio.exit")
+                    {
+                        if self.studio_rmb_down || self.captured {
+                            self.studio_rmb_down = false;
+                            self.capture(false);
+                        } else if self.studio_topbar.open_menu.is_some() {
+                            self.studio_topbar.close_dropdown();
+                        } else if self.studio_export.open {
+                            self.studio_export.open = false;
+                        } else {
+                            self.close_studio_replay()?;
+                        }
+                        return Ok(());
+                    }
+
+                    if self.studio_key_pressed(key, "key.studio.addMarker")
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.alt_key()
+                        && !self.modifiers.super_key()
+                        && self.screen == Screen::Playing
+                        && self.title.is_none()
+                        && !self.dialog_open()
+                        && self.ui.chat_screen.is_none()
+                        && (self.remote.as_ref().is_some_and(|r| r.session.is_recording())
+                            || self.studio_replay.is_some())
+                    {
+                        self.add_studio_marker();
+                        return Ok(());
+                    }
+
                     // Studio mode top bar shortcuts
                     if (self.studio_freecam.active || self.studio_replay.is_some())
                         && self.screen == Screen::Playing
@@ -19278,21 +19345,24 @@ impl Game<'_> {
                     {
                         // 1. Ctrl+E: Export Video
                         if (self.modifiers.control_key() || self.modifiers.super_key())
-                            && key == KeyCode::KeyE
+                            && self.studio_key_pressed(key, "key.studio.export")
                         {
                             self.studio_export.open = true;
                             return Ok(());
                         }
 
                         // 2. P: Pause Menu
-                        if key == KeyCode::KeyP {
+                        if self.studio_key_pressed(key, "key.studio.pauseMenu") {
                             self.pause_menu = true;
                             self.capture(false);
                             return Ok(());
                         }
 
                         // F: Toggle Freecam
-                        if key == KeyCode::KeyF && !self.modifiers.control_key() && !self.modifiers.super_key() {
+                        if self.studio_key_pressed(key, "key.studio.toggleFreecam")
+                            && !self.modifiers.control_key()
+                            && !self.modifiers.super_key()
+                        {
                             let active = !self.studio_freecam.active;
                             if active {
                                 let (pos, yaw, pitch) = self.camera_view(0.0).unwrap_or((
@@ -19310,7 +19380,7 @@ impl Game<'_> {
                         }
 
                         // 3. Home: Reset Camera to Player
-                        if key == KeyCode::Home {
+                        if self.studio_key_pressed(key, "key.studio.resetCamera") {
                             let (pos, yaw, pitch) = if let Some(p) = &self.player {
                                 (
                                     glam::DVec3::new(p.position.x, p.position.y + 1.62, p.position.z),
@@ -19320,19 +19390,25 @@ impl Game<'_> {
                             } else {
                                 (glam::DVec3::ZERO, 0.0, 0.0)
                             };
-                            self.studio_freecam.activate(pos, yaw, pitch, self.settings.fov);
+                            self.studio_freecam
+                                .activate(pos, yaw, pitch, self.settings.fov);
                             return Ok(());
                         }
 
                         // 4. L: Lock / Unlock Camera to Spline Path
-                        if key == KeyCode::KeyL {
-                            self.studio_freecam.locked_to_path = !self.studio_freecam.locked_to_path;
+                        if self.studio_key_pressed(key, "key.studio.togglePathLock") {
+                            self.studio_freecam.locked_to_path =
+                                !self.studio_freecam.locked_to_path;
                             return Ok(());
                         }
 
                         // 5. K: Add Keyframe
-                        if key == KeyCode::KeyK {
-                            let time_ms = self.studio_timeline.current_time_ms.min(u32::MAX as u64) as u32;
+                        if self.studio_key_pressed(key, "key.studio.addKeyframe") {
+                            let time_ms = self
+                                .studio_timeline
+                                .current_time_ms
+                                .min(u32::MAX as u64)
+                                as u32;
                             let kf = horizon_client::studio::CameraKeyframe::new(
                                 time_ms,
                                 [
@@ -19349,7 +19425,7 @@ impl Game<'_> {
                         }
 
                         // 6. Delete / Backspace: Remove selected keyframe
-                        if (key == KeyCode::Delete || key == KeyCode::Backspace)
+                        if self.studio_key_pressed(key, "key.studio.removeKeyframe")
                             && let Some(idx) = self.studio_timeline.selected_keyframe
                         {
                             if idx < self.studio_freecam.track.keyframes.len() {
@@ -19359,14 +19435,19 @@ impl Game<'_> {
                             return Ok(());
                         }
 
+
                         // 7. S: Split scene at playhead (when not holding RMB flight look)
-                        if key == KeyCode::KeyS && !self.studio_rmb_down && !self.captured {
-                            self.studio_timeline.split_at(self.studio_timeline.current_time_ms);
+                        if self.studio_key_pressed(key, "key.studio.splitScene")
+                            && !self.studio_rmb_down
+                            && !self.captured
+                        {
+                            self.studio_timeline
+                                .split_at(self.studio_timeline.current_time_ms);
                             return Ok(());
                         }
 
                         // 8. G: Cycle Framing Guides
-                        if key == KeyCode::KeyG {
+                        if self.studio_key_pressed(key, "key.studio.cycleGuides") {
                             let (g3, gc) = (
                                 self.studio_visuals.settings.guide_rule_of_thirds,
                                 self.studio_visuals.settings.guide_center,
@@ -19388,20 +19469,24 @@ impl Game<'_> {
                         }
 
                         // 7. Shift+A: Cycle Aspect Ratio Matte (avoids conflicting with 'A' strafe left)
-                        if key == KeyCode::KeyA && self.modifiers.shift_key() {
+                        if self.studio_key_pressed(key, "key.studio.cycleAspectRatio")
+                            && self.modifiers.shift_key()
+                        {
                             self.studio_visuals.settings.aspect_ratio =
                                 self.studio_visuals.settings.aspect_ratio.cycle();
                             return Ok(());
                         }
 
                         // 8. V: Toggle Visuals & Overrides Sidebar
-                        if key == KeyCode::KeyV {
+                        if self.studio_key_pressed(key, "key.studio.toggleVisuals") {
                             self.studio_visuals.open = !self.studio_visuals.open;
                             return Ok(());
                         }
 
                         // 9. T: Toggle Timeline HUD
-                        if key == KeyCode::KeyT && self.studio_replay.is_some() {
+                        if self.studio_key_pressed(key, "key.studio.toggleTimeline")
+                            && self.studio_replay.is_some()
+                        {
                             self.studio_timeline.visible = !self.studio_timeline.visible;
                             return Ok(());
                         }

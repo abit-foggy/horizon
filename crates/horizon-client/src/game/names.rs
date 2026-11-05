@@ -76,15 +76,14 @@ impl Game<'_> {
     /// camera entity (`LivingEntityRenderer.shouldShowName`).
     fn own_name_tag(&self) -> Option<(&Mob, String)> {
         let in_studio = self.studio_freecam.active || self.studio_replay.is_some();
-        if !in_studio {
-            if !self.settings.extras.own_name_tag
+        if !in_studio
+            && (!self.settings.extras.own_name_tag
                 || self.camera_type.first_person()
                 || self.sleeping.is_some()
                 || self.spectator()
-                || self.own_invisible()
-            {
-                return None;
-            }
+                || self.own_invisible())
+        {
+            return None;
         }
         let m = self.player_model.as_ref()?;
         Some((m, self.own_profile_name()))
@@ -92,12 +91,11 @@ impl Game<'_> {
     /// The local player's profile name as others see it: the session's on a
     /// server (single player's server thread included), else the local player's.
     pub(super) fn own_profile_name(&self) -> String {
-        if let Some(replay) = &self.studio_replay {
-            if let Some(player) = replay.metadata.players.first() {
-                if !player.is_empty() {
-                    return player.clone();
-                }
-            }
+        if let Some(replay) = &self.studio_replay
+            && let Some(player) = replay.metadata.players.first()
+            && !player.is_empty()
+        {
+            return player.clone();
         }
         match self.remote.as_ref() {
             Some(r) if !r.profile_name.is_empty() => r.profile_name.clone(),

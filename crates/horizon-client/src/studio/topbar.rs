@@ -24,13 +24,16 @@ pub enum TopBarMenu {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TopBarAction {
     None,
+    OpenStudioSettings,
     OpenPauseMenu,
     ExitStudio,
     ExportVideo,
     OpenRecordingsFolder,
     ResetCameraToPlayer,
     ToggleLockToPath,
+    ToggleFreecam,
     AddKeyframe,
+    AddMarker,
     ClearKeyframes,
     ToggleVisualsSidebar,
     ToggleTimeline,
@@ -72,6 +75,7 @@ impl TopBarUi {
         replay: Option<&ReplayDriver>,
         recording_name: Option<&str>,
         path_locked: bool,
+        keys: &horizon_client::keybinds::KeyBinds,
     ) {
         let w = batch.width;
         let bar_h = self.height;
@@ -150,9 +154,10 @@ impl TopBarUi {
         let exit_bg = if exit_hover { 0xCC7A2424 } else { 0x66441818 };
         style::fill(batch, atlas, [exit_x, 2.0, exit_w, bar_h - 4.0], exit_bg);
         style::ring(batch, atlas, [exit_x, 2.0, exit_w, bar_h - 4.0], 0x889A3838);
+        let exit_key = horizon_client::keybinds::display_name(keys.get("key.studio.exit")).plain();
         batch.text_styled(
             atlas,
-            &Text::literal("Exit (Esc)"),
+            &Text::literal(format!("Exit ({exit_key})")),
             exit_x + 8.0,
             6.0,
             style::WHITE,
@@ -199,7 +204,7 @@ impl TopBarUi {
 
         // 6. Draw Open Dropdown Menu if any
         if let Some(menu) = self.open_menu {
-            self.render_dropdown(batch, atlas, cursor, menu, path_locked);
+            self.render_dropdown(batch, atlas, cursor, menu, path_locked, keys);
         }
     }
 
@@ -210,40 +215,82 @@ impl TopBarUi {
         cursor: (f32, f32),
         menu: TopBarMenu,
         path_locked: bool,
+        keys: &horizon_client::keybinds::KeyBinds,
     ) {
-        let (x, items): (f32, Vec<(&str, &str)>) = match menu {
+        let shortcut = |mapping: &str, modifier: &str| {
+            let key = horizon_client::keybinds::display_name(keys.get(mapping)).plain();
+            if modifier.is_empty() {
+                key
+            } else {
+                format!("{modifier}+{key}")
+            }
+        };
+        let (x, items): (f32, Vec<(String, String)>) = match menu {
             TopBarMenu::File => (
                 80.0,
                 vec![
-                    ("🎬 Export Video...", "Ctrl+E"),
-                    ("📁 Open Recordings Folder", ""),
-                    ("⏸ Game Pause Menu", "P"),
-                    ("✕ Close Replay", "Esc"),
+                    (
+                        "🎬 Export Video...".into(),
+                        shortcut("key.studio.export", "Ctrl"),
+                    ),
+                    ("📁 Open Recordings Folder".into(), String::new()),
+                    ("horizon.studio.settings.open".into(), String::new()),
+                    (
+                        "⏸ Game Pause Menu".into(),
+                        shortcut("key.studio.pauseMenu", ""),
+                    ),
+                    ("✕ Close Replay".into(), shortcut("key.studio.exit", "")),
                 ],
             ),
             TopBarMenu::Camera => (
                 120.0,
                 vec![
-                    ("👤 Reset to Player", "Home"),
+                    (
+                        "horizon.studio.topbar.toggle_freecam".into(),
+                        shortcut("key.studio.toggleFreecam", ""),
+                    ),
+                    (
+                        "👤 Reset to Player".into(),
+                        shortcut("key.studio.resetCamera", ""),
+                    ),
                     (
                         if path_locked {
-                            "🔓 Unlock Freecam"
+                            "🔓 Unlock Freecam".into()
                         } else {
-                            "🔒 Lock to Spline"
+                            "🔒 Lock to Spline".into()
                         },
-                        "L",
+                        shortcut("key.studio.togglePathLock", ""),
                     ),
-                    ("➕ Add Keyframe", "K"),
-                    ("🗑 Clear Keyframes", ""),
+                    (
+                        "➕ Add Keyframe".into(),
+                        shortcut("key.studio.addKeyframe", ""),
+                    ),
+                    (
+                        "horizon.studio.topbar.add_marker".into(),
+                        shortcut("key.studio.addMarker", ""),
+                    ),
+                    ("🗑 Clear Keyframes".into(), String::new()),
                 ],
             ),
             TopBarMenu::View => (
                 176.0,
                 vec![
-                    ("📐 Framing Guides", "G"),
-                    ("⬛ Aspect Ratio Matte", "Shift+A"),
-                    ("🎛 Visuals Sidebar", "V"),
-                    ("⏱ Timeline HUD", "T"),
+                    (
+                        "📐 Framing Guides".into(),
+                        shortcut("key.studio.cycleGuides", ""),
+                    ),
+                    (
+                        "⬛ Aspect Ratio Matte".into(),
+                        shortcut("key.studio.cycleAspectRatio", "Shift"),
+                    ),
+                    (
+                        "🎛 Visuals Sidebar".into(),
+                        shortcut("key.studio.toggleVisuals", ""),
+                    ),
+                    (
+                        "⏱ Timeline HUD".into(),
+                        shortcut("key.studio.toggleTimeline", ""),
+                    ),
                 ],
             ),
         };
@@ -281,17 +328,15 @@ impl TopBarUi {
             } else {
                 style::MUTED
             };
-            batch.text_styled(
-                atlas,
-                &Text::literal(*label),
-                x + 8.0,
-                item_y + 6.0,
-                text_color,
-                true,
-            );
+            let label_text = if label.starts_with("horizon.") {
+                Text::translate(label, &[])
+            } else {
+                Text::literal(label)
+            };
+            batch.text_styled(atlas, &label_text, x + 8.0, item_y + 6.0, text_color, true);
 
             if !shortcut.is_empty() {
-                let sc_text = Text::literal(*shortcut);
+                let sc_text = Text::literal(shortcut);
                 let sc_w = atlas.font.width_text(&sc_text);
                 batch.text_styled(
                     atlas,
@@ -317,8 +362,8 @@ impl TopBarUi {
         // Check dropdown items first if dropdown is currently open
         if let Some(menu) = self.open_menu {
             let (menu_x, count) = match menu {
-                TopBarMenu::File => (80.0, 4),
-                TopBarMenu::Camera => (120.0, 4),
+                TopBarMenu::File => (80.0, 5),
+                TopBarMenu::Camera => (120.0, 6),
                 TopBarMenu::View => (176.0, 4),
             };
             let menu_w = 175.0;
@@ -332,13 +377,16 @@ impl TopBarUi {
                 return match (menu, idx) {
                     (TopBarMenu::File, 0) => TopBarAction::ExportVideo,
                     (TopBarMenu::File, 1) => TopBarAction::OpenRecordingsFolder,
-                    (TopBarMenu::File, 2) => TopBarAction::OpenPauseMenu,
-                    (TopBarMenu::File, 3) => TopBarAction::ExitStudio,
+                    (TopBarMenu::File, 2) => TopBarAction::OpenStudioSettings,
+                    (TopBarMenu::File, 3) => TopBarAction::OpenPauseMenu,
+                    (TopBarMenu::File, 4) => TopBarAction::ExitStudio,
 
-                    (TopBarMenu::Camera, 0) => TopBarAction::ResetCameraToPlayer,
-                    (TopBarMenu::Camera, 1) => TopBarAction::ToggleLockToPath,
-                    (TopBarMenu::Camera, 2) => TopBarAction::AddKeyframe,
-                    (TopBarMenu::Camera, 3) => TopBarAction::ClearKeyframes,
+                    (TopBarMenu::Camera, 0) => TopBarAction::ToggleFreecam,
+                    (TopBarMenu::Camera, 1) => TopBarAction::ResetCameraToPlayer,
+                    (TopBarMenu::Camera, 2) => TopBarAction::ToggleLockToPath,
+                    (TopBarMenu::Camera, 3) => TopBarAction::AddKeyframe,
+                    (TopBarMenu::Camera, 4) => TopBarAction::AddMarker,
+                    (TopBarMenu::Camera, 5) => TopBarAction::ClearKeyframes,
 
                     (TopBarMenu::View, 0) => TopBarAction::CycleGuides,
                     (TopBarMenu::View, 1) => TopBarAction::CycleAspectRatio,
@@ -359,7 +407,7 @@ impl TopBarUi {
             }
 
             // Game Pause Menu button
-            if cx >= 224.0 && cx <= 308.0 {
+            if (224.0..=308.0).contains(&cx) {
                 self.open_menu = None;
                 return TopBarAction::OpenPauseMenu;
             }
@@ -425,6 +473,14 @@ mod tests {
         // Click Exit Studio button
         let exit_action = topbar.handle_mouse_click((1280.0 - 40.0, 10.0), 1280.0, 720.0);
         assert_eq!(exit_action, TopBarAction::ExitStudio);
+    }
+
+    #[test]
+    fn camera_menu_add_marker_action_uses_m_shortcut_row() {
+        let mut topbar = TopBarUi::new();
+        topbar.handle_mouse_click((130.0, 10.0), 1280.0, 720.0);
+        let action = topbar.handle_mouse_click((130.0, 124.0), 1280.0, 720.0);
+        assert_eq!(action, TopBarAction::AddMarker);
     }
 
     #[test]

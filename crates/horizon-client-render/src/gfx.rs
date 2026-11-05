@@ -9451,6 +9451,8 @@ impl Renderer {
                         keep_depth,
                         self.own_timing.as_mut(),
                         "World after visibility buffer",
+                        frame.comp_box,
+                        [self.config.width, self.config.height],
                     );
                     pass.set_bind_group(0, &self.group, &[]);
                     pack_frame(&mut pass);

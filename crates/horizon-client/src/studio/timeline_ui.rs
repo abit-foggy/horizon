@@ -5,6 +5,7 @@
 //! deletion, and cutting/splitting the sequence between frames/scenes.
 
 use super::camera::StudioFreecam;
+use super::mcpr::Marker;
 use horizon_client_render::{
     graphics_style as style,
     hud::{HudAtlas, HudBatch},
@@ -452,7 +453,12 @@ impl TimelineUi {
             } else {
                 0xFF2A_3040
             };
-            style::fill(batch, atlas, [seg_x + 1.0, y + 1.0, seg_w - 2.0, bar_h - 2.0], bg_color);
+            style::fill(
+                batch,
+                atlas,
+                [seg_x + 1.0, y + 1.0, seg_w - 2.0, bar_h - 2.0],
+                bg_color,
+            );
 
             // Scene name badge inside clip
             if seg_w > 45.0 {
@@ -473,7 +479,12 @@ impl TimelineUi {
                 style::fill(batch, atlas, [seg_x - 1.0, y, 2.0, bar_h], 0xFF8A_98B8);
                 // Top and bottom cut notch tick marks
                 style::fill(batch, atlas, [seg_x - 3.0, y, 6.0, 2.0], 0xFFB4_C4E6);
-                style::fill(batch, atlas, [seg_x - 3.0, y + bar_h - 2.0, 6.0, 2.0], 0xFFB4_C4E6);
+                style::fill(
+                    batch,
+                    atlas,
+                    [seg_x - 3.0, y + bar_h - 2.0, 6.0, 2.0],
+                    0xFFB4_C4E6,
+                );
             }
         }
 
@@ -497,6 +508,12 @@ impl TimelineUi {
 
             // Draw keyframe diamond ◆
             self.draw_diamond(batch, atlas, kx, ky, 10.0, node_color);
+        }
+
+        for marker in &self.markers {
+            let norm = (marker.time_ms as f32 / total_dur).clamp(0.0, 1.0);
+            let x = start_x + norm * track_w;
+            self.draw_diamond(batch, atlas, x, y + bar_h - 5.0, 7.0, 0xFFFF_C83B);
         }
     }
 

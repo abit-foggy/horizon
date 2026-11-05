@@ -410,6 +410,17 @@ impl StudioUi {
         let btn_y = h - 28.0;
         let btn_h = 20.0;
 
+        let settings_btn = [w - 116.0, 4.0, 108.0, 22.0];
+        if ui::hovered(
+            cursor,
+            settings_btn[0],
+            settings_btn[1],
+            settings_btn[2],
+            settings_btn[3],
+        ) {
+            return StudioAction::OpenSettings;
+        }
+
         // Button 1: Open Folder
         let f_btn = [panel_x, btn_y, 130.0, btn_h];
         if ui::hovered(cursor, f_btn[0], f_btn[1], f_btn[2], f_btn[3]) {
@@ -470,6 +481,144 @@ impl StudioUi {
     /// Scroll list by mouse wheel delta.
     pub fn wheel(&mut self, amount: f32) {
         self.scroll = (self.scroll - amount * 24.0).max(0.0);
+    }
+}
+
+/// Actions on the dedicated Studio Settings page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StudioSettingsAction {
+    None,
+    ToggleSounds,
+    ToggleSkins,
+    ToggleNames,
+    ToggleModsManifest,
+    ToggleResourcePack,
+    Back,
+}
+
+/// Renderer for recording-related Studio settings, separate from shot visuals.
+#[derive(Clone, Debug, Default)]
+pub struct StudioSettingsUi;
+
+impl StudioSettingsUi {
+    pub fn draw(
+        &self,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        cursor: (f32, f32),
+        in_world: bool,
+        settings: &crate::studio_preferences::StudioPreferences,
+    ) {
+        let (w, h) = (batch.width, batch.height);
+        ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
+        style::title(
+            batch,
+            atlas,
+            &Text::translate("horizon.studio.settings.title", &[]),
+        );
+        ui::centered_text(
+            batch,
+            atlas,
+            &Text::translate("horizon.studio.settings.description", &[]),
+            18.0,
+            34.0,
+            w - 36.0,
+            style::GREY,
+        );
+
+        let panel_w = (w - 40.0).clamp(280.0, 460.0);
+        let panel_x = ((w - panel_w) / 2.0).floor();
+        let panel_y = 62.0;
+        let panel_h = (h - 104.0).max(86.0);
+        style::panel(batch, atlas, [panel_x, panel_y, panel_w, panel_h]);
+
+        let row_x = panel_x + 12.0;
+        let row_w = panel_w - 24.0;
+        let row_h = 28.0;
+        let sounds = [row_x, panel_y + 10.0, row_w, row_h];
+        let skins = [row_x, panel_y + 42.0, row_w, row_h];
+        let names = [row_x, panel_y + 74.0, row_w, row_h];
+        let mods = [row_x, panel_y + 106.0, row_w, row_h];
+        let resource_pack = [row_x, panel_y + 138.0, row_w, row_h];
+        for (rect, key, enabled) in [
+            (
+                sounds,
+                "horizon.studio.settings.sounds",
+                settings.record_sounds,
+            ),
+            (
+                skins,
+                "horizon.studio.settings.skins",
+                settings.record_player_skins,
+            ),
+            (
+                names,
+                "horizon.studio.settings.names",
+                settings.record_player_names,
+            ),
+            (
+                mods,
+                "horizon.studio.settings.mods",
+                settings.include_mods_manifest,
+            ),
+            (
+                resource_pack,
+                "horizon.studio.settings.resource_pack",
+                settings.include_resource_pack,
+            ),
+        ] {
+            let value = Text::translate(if enabled { "options.on" } else { "options.off" }, &[]);
+            let label = Text::translate(key, &[value]);
+            let hovered = ui::hovered(cursor, rect[0], rect[1], rect[2], rect[3]);
+            style::button(batch, atlas, rect, &label, (hovered, true, enabled));
+        }
+
+        let done = [panel_x + panel_w - 84.0, h - 30.0, 84.0, 20.0];
+        let done_hover = ui::hovered(cursor, done[0], done[1], done[2], done[3]);
+        style::button(
+            batch,
+            atlas,
+            done,
+            &Text::translate("gui.done", &[]),
+            (done_hover, true, false),
+        );
+    }
+
+    pub fn click(&self, cursor: (f32, f32), size: (f32, f32)) -> StudioSettingsAction {
+        let (w, h) = size;
+        let panel_w = (w - 40.0).clamp(280.0, 460.0);
+        let panel_x = ((w - panel_w) / 2.0).floor();
+        let panel_y = 62.0;
+        let row_x = panel_x + 12.0;
+        let row_w = panel_w - 24.0;
+        let row_h = 28.0;
+        let sounds = [row_x, panel_y + 10.0, row_w, row_h];
+        let skins = [row_x, panel_y + 42.0, row_w, row_h];
+        let names = [row_x, panel_y + 74.0, row_w, row_h];
+        let mods = [row_x, panel_y + 106.0, row_w, row_h];
+        let resource_pack = [row_x, panel_y + 138.0, row_w, row_h];
+        let done = [panel_x + panel_w - 84.0, h - 30.0, 84.0, 20.0];
+        if ui::hovered(cursor, sounds[0], sounds[1], sounds[2], sounds[3]) {
+            StudioSettingsAction::ToggleSounds
+        } else if ui::hovered(cursor, skins[0], skins[1], skins[2], skins[3]) {
+            StudioSettingsAction::ToggleSkins
+        } else if ui::hovered(cursor, names[0], names[1], names[2], names[3]) {
+            StudioSettingsAction::ToggleNames
+        } else if ui::hovered(cursor, mods[0], mods[1], mods[2], mods[3]) {
+            StudioSettingsAction::ToggleModsManifest
+        } else if ui::hovered(
+            cursor,
+            resource_pack[0],
+            resource_pack[1],
+            resource_pack[2],
+            resource_pack[3],
+        ) {
+            StudioSettingsAction::ToggleResourcePack
+        } else if ui::hovered(cursor, done[0], done[1], done[2], done[3]) {
+            StudioSettingsAction::Back
+        } else {
+            StudioSettingsAction::None
+        }
     }
 }
 

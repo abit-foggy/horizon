@@ -292,7 +292,42 @@ impl Session {
         path: impl Into<PathBuf>,
         metadata: Metadata,
     ) -> std::io::Result<()> {
-        let rec = StudioRecorder::start(path.into(), metadata)?;
+        self.start_recording_with_appearances(path, metadata, false, false)
+    }
+    /// Start recording with opt-in, local-only player appearance capture.
+    pub fn start_recording_with_appearances(
+        &self,
+        path: impl Into<PathBuf>,
+        metadata: Metadata,
+        capture_skins: bool,
+        capture_names: bool,
+    ) -> std::io::Result<()> {
+        self.start_recording_with_archive_options(
+            path,
+            metadata,
+            capture_skins,
+            capture_names,
+            None,
+            None,
+        )
+    }
+    pub fn start_recording_with_archive_options(
+        &self,
+        path: impl Into<PathBuf>,
+        metadata: Metadata,
+        capture_skins: bool,
+        capture_names: bool,
+        mods_json: Option<Vec<u8>>,
+        resource_pack: Option<PathBuf>,
+    ) -> std::io::Result<()> {
+        let rec = StudioRecorder::start_with_archive_options(
+            path.into(),
+            metadata,
+            capture_skins,
+            capture_names,
+            mods_json,
+            resource_pack,
+        )?;
         *self.recorder.lock().unwrap() = Some(rec);
         Ok(())
     }
@@ -300,6 +335,11 @@ impl Session {
     pub fn stop_recording(&self) -> Option<std::io::Result<PathBuf>> {
         let rec = self.recorder.lock().unwrap().take()?;
         Some(rec.stop())
+    }
+    pub fn record_marker(&self, label: String) {
+        if let Some(recorder) = self.recorder.lock().unwrap().as_ref() {
+            recorder.record_marker(label);
+        }
     }
     /// Whether recording is currently active.
     pub fn is_recording(&self) -> bool {
@@ -323,6 +363,19 @@ impl Session {
     pub fn record_packet(&self, id: i32, payload: &[u8]) {
         if let Some(rec) = self.recorder.lock().unwrap().as_ref() {
             rec.record_packet(id, payload);
+        }
+    }
+    /// Store resolved appearance data beside the `.mcpr`, outside the archive.
+    pub fn record_appearance(
+        &self,
+        uuid: u128,
+        name: Option<&str>,
+        slim: bool,
+        skin_rgba: Option<&[u8]>,
+        cape_rgba: Option<&[u8]>,
+    ) {
+        if let Some(rec) = self.recorder.lock().unwrap().as_ref() {
+            rec.record_appearance(uuid, name, slim, skin_rgba, cape_rgba);
         }
     }
     /// Record an encoded Clientbound packet into the active recording session at current elapsed time.
@@ -2396,8 +2449,14 @@ mod tests {
 
         let session = Session::replay("StudioTester");
 
-        let temp_dir =
-            std::env::temp_dir().join(format!("horizon-studio-motion-test-{}", std::process::id()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "horizon-studio-motion-test-{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let _ = std::fs::create_dir_all(&temp_dir);
         let mcpr_path = temp_dir.join("test_motion.mcpr");
 
@@ -2423,12 +2482,10 @@ mod tests {
         assert_eq!(saved_path, mcpr_path);
         assert!(!session.is_recording());
 
-        // Verify replay driver decodes the motion packet
-        let mut driver = crate::studio::ReplayDriver::open(&mcpr_path).unwrap();
-        assert_eq!(driver.packet_count(), 1);
-        let packets = driver.advance(Duration::from_secs(1)).unwrap();
-        assert_eq!(packets.len(), 1);
-        let decoded = play::Clientbound::decode(packets[0].id, &packets[0].payload).unwrap();
+        let mut recording = crate::studio::McprReader::open(&mcpr_path).unwrap();
+        assert_eq!(recording.total_packets(), 1);
+        let packet = recording.next_packet().unwrap().unwrap();
+        let decoded = play::Clientbound::decode(packet.id, &packet.payload).unwrap();
         assert_eq!(decoded, pos_pkt);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -2437,13 +2494,19 @@ mod tests {
     #[test]
     fn studio_session_record_local_player_animations() {
         use crate::studio::Metadata;
+        use horizon_protocol::entity_data::{Value, serializer};
         use horizon_protocol::packets::play;
-        use horizon_protocol::entity_data::{serializer, Value};
 
         let session = Session::replay("StudioTester");
 
-        let temp_dir =
-            std::env::temp_dir().join(format!("horizon-studio-anim-test-{}", std::process::id()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "horizon-studio-anim-test-{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let _ = std::fs::create_dir_all(&temp_dir);
         let mcpr_path = temp_dir.join("test_anim.mcpr");
 
@@ -2466,6 +2529,7 @@ mod tests {
             values: vec![
                 (0, serializer::BYTE, Value::Byte(0x02)),
                 (6, serializer::POSE, Value::Id(5)),
+                (2, serializer::OPTIONAL_COMPONENT, Value::OptText(None)),
             ],
         });
         session.record_clientbound(&data_pkt);
@@ -2474,15 +2538,23 @@ mod tests {
         assert_eq!(saved_path, mcpr_path);
         assert!(!session.is_recording());
 
-        // Verify replay driver decodes both animation packets
-        let mut driver = crate::studio::ReplayDriver::open(&mcpr_path).unwrap();
-        assert_eq!(driver.packet_count(), 2);
-        let packets = driver.advance(Duration::from_secs(1)).unwrap();
-        assert_eq!(packets.len(), 2);
-        let decoded_swing = play::Clientbound::decode(packets[0].id, &packets[0].payload).unwrap();
+        let mut recording = crate::studio::McprReader::open(&mcpr_path).unwrap();
+        assert_eq!(recording.total_packets(), 2);
+        let packet1 = recording.next_packet().unwrap().unwrap();
+        let packet2 = recording.next_packet().unwrap().unwrap();
+        let decoded_swing = play::Clientbound::decode(packet1.id, &packet1.payload).unwrap();
         assert_eq!(decoded_swing, swing_pkt);
-        let decoded_data = play::Clientbound::decode(packets[1].id, &packets[1].payload).unwrap();
-        assert_eq!(decoded_data, data_pkt);
+        let decoded_data = play::Clientbound::decode(packet2.id, &packet2.payload).unwrap();
+        assert_eq!(
+            decoded_data,
+            play::Clientbound::SetEntityData(play::SetEntityData {
+                id: 42,
+                values: vec![
+                    (0, serializer::BYTE, Value::Byte(0x02)),
+                    (6, serializer::POSE, Value::Id(5)),
+                ],
+            })
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
