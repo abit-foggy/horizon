@@ -27,11 +27,14 @@ struct Point { x: f64, y: f64 }
 enum MouseScrollDelta { LineDelta(f32, f32), PixelDelta(Point) }
 struct Settings { discrete_scroll: bool, mouse_wheel_sensitivity: f32 }
 struct Player { flying_speed: f32 }
+struct StudioFreecam { active: bool, speed_changes: Vec<i32> }
+impl StudioFreecam { fn adjust_speed(&mut self, steps: i32) { self.speed_changes.push(steps); } }
 struct SpectatorGui { active: bool }
 impl SpectatorGui { fn is_menu_active(&self) -> bool { self.active } }
 fn glfw_modifiers(bits: u32) -> u32 { bits }
 struct Game { screen: Screen, overlay: bool, sleeping: Option<()>, player: Option<Player>,
     legacy_claimed: bool, synthetic: bool, cancel: bool, mouse: mouse::MouseLook, selected: usize,
+    studio_freecam: StudioFreecam,
     settings: Settings, physical_buttons: HashSet<MouseButton>, cursor: (f32, f32), modifiers: u32,
     spectator: bool, spectator_gui: SpectatorGui, menu_scrolls: Vec<i32>, legacy_calls: usize,
     calls: Vec<([f64; 2], [i32; 2], [bool; 3], [f32; 2], u32)> }
@@ -39,6 +42,7 @@ impl Game {
     fn new() -> Self { Self { screen: Screen::Playing, overlay: false, sleeping: None,
         player: Some(Player { flying_speed: 0.1 }), legacy_claimed: false, synthetic: false,
         cancel: false, mouse: mouse::MouseLook::default(), selected: 4,
+        studio_freecam: StudioFreecam { active: false, speed_changes: vec![] },
         settings: Settings { discrete_scroll: false, mouse_wheel_sensitivity: 1.0 },
         physical_buttons: HashSet::from([MouseButton::Left, MouseButton::Right]),
         cursor: (10.0, 20.0), modifiers: 5, spectator: false, spectator_gui: SpectatorGui { active: false },
@@ -103,6 +107,13 @@ fn source_and_legacy_gates() {
         assert!(game.calls.is_empty());
         assert_eq!(game.selected, if gate==5 {3} else {4});
     }
+}
+#[test]
+fn studio_freecam_wheel_adjusts_movement_speed() {
+    let mut game = Game::new();
+    game.studio_freecam.active = true;
+    game.wheel(MouseScrollDelta::LineDelta(0.0, 2.0)).unwrap();
+    assert_eq!(game.studio_freecam.speed_changes, [2]);
 }
 """.replace("MOUSE_PATH", (ROOT / "crates/horizon-client-input/src/mouse.rs").as_posix()).replace("NORMALIZE", normalize).replace("DISPATCH", dispatch)
         with tempfile.TemporaryDirectory() as folder:

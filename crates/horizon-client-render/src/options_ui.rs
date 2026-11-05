@@ -2569,7 +2569,13 @@ impl OptionsUi {
                         ),
                         Some(open("horizon.pages.open.pvp", Page::Pvp)),
                     ),
-                    Row::Buttons(open("horizon.pages.open.studio", Page::Studio), None),
+                    Row::Buttons(
+                        open("horizon.pages.open.studio", Page::Studio),
+                        Some(open(
+                            "horizon.pages.open.studio_settings",
+                            Page::StudioSettings,
+                        )),
+                    ),
                     // No AI hides the AI Agent page and everything AI.
                     Row::Buttons(
                         self.extra_button(s, crate::extras::Item::DiscordPresence),

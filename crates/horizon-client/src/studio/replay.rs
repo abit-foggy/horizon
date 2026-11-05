@@ -229,4 +229,44 @@ mod tests {
         let _ = fs::remove_file(mcpr_path);
         let _ = fs::remove_dir(temp_dir);
     }
+
+    #[test]
+    fn replay_marker_is_saved_and_loaded_from_the_archive() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "replay_marker_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let mcpr_path = temp_dir.join("markers.mcpr");
+        let mut writer = McprWriter::new(
+            mcpr_path.clone(),
+            Metadata {
+                duration: 1_000,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        writer.write_packet(0, 0x01, &[1]).unwrap();
+        writer.finish(1_000).unwrap();
+
+        let mut replay = ReplayDriver::open(&mcpr_path).unwrap();
+        replay.seek(250).unwrap();
+        replay.add_marker("Bookmark".into()).unwrap();
+        drop(replay);
+
+        let replay = ReplayDriver::open(&mcpr_path).unwrap();
+        assert_eq!(
+            replay.markers(),
+            &[Marker {
+                time_ms: 250,
+                label: "Bookmark".into(),
+            }]
+        );
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
 }

@@ -3,7 +3,7 @@
 //! Captures clientbound network packets in real-time onto a background writer
 //! thread so gameplay frame rates and latency are unaffected.
 
-use super::mcpr::{McprWriter, Metadata, TimestampedPacket};
+use super::mcpr::{McprWriter, Metadata, TimestampedPacket, write_private_file};
 use std::{
     collections::HashMap,
     io,
@@ -409,7 +409,7 @@ impl StudioRecorder {
             let sidecar = local_root.join(format!("{}.json", stem.to_string_lossy()));
             let bytes = serde_json::to_vec(&appearances.values().collect::<Vec<_>>())
                 .map_err(io::Error::other)?;
-            std::fs::write(sidecar, bytes)?;
+            write_private_file(&sidecar, &bytes)?;
         }
         Ok(result)
     }
@@ -501,5 +501,112 @@ mod tests {
 
         let _ = fs::remove_file(mcpr_path);
         let _ = fs::remove_dir(temp_dir);
+    }
+
+    #[test]
+    fn sound_capture_setting_filters_sound_packets_only_when_disabled() {
+        use horizon_protocol::{buf::Reader, packets::play};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "studio_sound_setting_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let sound = play::Clientbound::Sound(play::Sound {
+            sound: (1, None),
+            source: 0,
+            x: 0,
+            y: 0,
+            z: 0,
+            volume: 1.0,
+            pitch: 1.0,
+            seed: 0,
+        })
+        .encode();
+        let mut reader = Reader::new(&sound);
+        let id = reader.varint().unwrap();
+        let payload = reader.rest();
+
+        let disabled = StudioRecorder::start_with_archive_options(
+            temp_dir.join("disabled.mcpr"),
+            Metadata::default(),
+            false,
+            false,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(disabled.sanitized_packet(id, payload).is_none());
+        drop(disabled);
+
+        let enabled = StudioRecorder::start_with_archive_options(
+            temp_dir.join("enabled.mcpr"),
+            Metadata::default(),
+            false,
+            false,
+            true,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(enabled.sanitized_packet(id, payload).is_some());
+        drop(enabled);
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn appearance_entity_uuid_matches_the_recorded_entity_uuid() {
+        use horizon_protocol::{buf::Reader, packets::play};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "studio_entity_uuid_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let recorder =
+            StudioRecorder::start(temp_dir.join("entity_uuid.mcpr"), Metadata::default()).unwrap();
+        let original = play::AddEntity {
+            id: 18,
+            uuid: 0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10,
+            kind: 42,
+            position: [1.0, 64.0, -2.0],
+            velocity: [0.0, 0.0, 0.0],
+            pitch: 1,
+            yaw: 2,
+            head_yaw: 3,
+            data: 4,
+        };
+        let expected_uuid = recorder.anonymous_uuid(original.uuid);
+        let encoded = play::Clientbound::AddEntity(original.clone()).encode();
+        let mut reader = Reader::new(&encoded);
+        let packet_id = reader.varint().unwrap();
+        let (recorded_id, payload) = recorder.sanitized_packet(packet_id, reader.rest()).unwrap();
+        let play::Clientbound::AddEntity(recorded) =
+            play::Clientbound::decode(recorded_id, &payload).unwrap()
+        else {
+            panic!("sanitized packet changed type")
+        };
+
+        assert_ne!(recorded.uuid, original.uuid);
+        assert_eq!(recorded.uuid, expected_uuid);
+        assert_eq!(recorded.id, original.id);
+        assert_eq!(recorded.kind, original.kind);
+        assert_eq!(recorded.position, original.position);
+        assert_eq!(recorded.velocity, original.velocity);
+        assert_eq!(recorded.pitch, original.pitch);
+        assert_eq!(recorded.yaw, original.yaw);
+        assert_eq!(recorded.head_yaw, original.head_yaw);
+        assert_eq!(recorded.data, original.data);
+        drop(recorder);
+        fs::remove_dir_all(temp_dir).unwrap();
     }
 }

@@ -703,14 +703,30 @@ impl Game<'_> {
     }
 
     pub(super) fn add_studio_marker(&mut self) {
-        let time_ms = self.studio_timeline.current_time_ms.min(u32::MAX as u64) as u32;
         let label = Text::translate("horizon.studio.marker.default", &[]).plain();
-        if let Some(remote) = self.remote.as_ref() {
+        if let Some(replay) = self.studio_replay.as_mut() {
+            let time_ms = replay.position_ms();
+            if let Err(error) = replay.add_marker(label.clone()) {
+                self.system_message(Text::tr("horizon.studio.marker.error", &[&error]));
+                return;
+            }
+            self.studio_timeline.markers = replay.markers().to_vec();
+            self.studio_timeline.current_time_ms = u64::from(time_ms);
+        } else if let Some(remote) = self.remote.as_ref()
+            && let Some(status) = remote.session.recorder_status()
+            && status.active
+        {
+            let time_ms = status.elapsed.as_millis().min(u32::MAX as u128) as u32;
             remote.session.record_marker(label.clone());
+            self.studio_timeline.current_time_ms = u64::from(time_ms);
+            self.studio_timeline
+                .markers
+                .push(horizon_client::studio::mcpr::Marker { time_ms, label });
+        } else {
+            self.system_message(Text::translate("horizon.studio.marker.no_recording", &[]));
+            return;
         }
-        self.studio_timeline
-            .markers
-            .push(horizon_client::studio::mcpr::Marker { time_ms, label });
+        self.system_message(Text::translate("horizon.studio.marker.added", &[]));
     }
 
     pub(super) fn studio_recording_status(&self) -> Value {

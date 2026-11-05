@@ -121,6 +121,7 @@ impl Default for StudioUi {
 }
 
 impl StudioUi {
+    const MAX_METADATA_BYTES: u64 = 1 << 20;
     /// Create a new StudioUi for the given recordings directory.
     pub fn new(record_dir: impl Into<PathBuf>) -> Self {
         let dir = record_dir.into();
@@ -144,9 +145,15 @@ impl StudioUi {
     pub fn read_metadata(path: &Path) -> Option<RecordingMetadata> {
         let file = File::open(path).ok()?;
         let mut archive = zip::ZipArchive::new(file).ok()?;
-        let mut meta_file = archive.by_name("metaData.json").ok()?;
+        let meta_file = archive.by_name("metaData.json").ok()?;
         let mut meta_bytes = Vec::new();
-        meta_file.read_to_end(&mut meta_bytes).ok()?;
+        meta_file
+            .take(Self::MAX_METADATA_BYTES + 1)
+            .read_to_end(&mut meta_bytes)
+            .ok()?;
+        if meta_bytes.len() as u64 > Self::MAX_METADATA_BYTES {
+            return None;
+        }
         serde_json::from_slice(&meta_bytes).ok()
     }
 
@@ -691,11 +698,8 @@ mod tests {
         assert_eq!(action, StudioAction::None);
         assert_eq!(ui.selected, Some(0));
 
-        // Click ▶ Edit button directly on the card:
-        // Panel width = (427-40).clamp(280, 440) = 387. panel_x = (427-387)/2 = 20.
-        // Card x = 26, card w = 375. Card edit button x >= 26 + 375 - 48 - 6 = 347.
-        // y is panel_y + 6 = 48.
-        let card_edit_action = ui.click((360.0, 55.0), (427.0, 720.0));
+        // Click the footer's Edit Replay action.
+        let card_edit_action = ui.click((260.0, 702.0), (427.0, 720.0));
         assert!(matches!(card_edit_action, StudioAction::LoadAndEdit(_)));
 
         // Clean up

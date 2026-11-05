@@ -386,38 +386,25 @@ impl ExportUi {
             (cancel_hover, true, false),
         );
 
-        // Add to Queue
+        // Queueing and export need the encoder, which is not implemented yet.
+        // Show the setting panel without presenting nonfunctional actions.
         let queue_rect = [x + 78.0, btn_y, 90.0, 18.0];
-        let queue_hover = ui::hovered(
-            cursor,
-            queue_rect[0],
-            queue_rect[1],
-            queue_rect[2],
-            queue_rect[3],
-        );
         style::button(
             batch,
             atlas,
             queue_rect,
-            &Text::literal("Add to Queue"),
-            (queue_hover, true, false),
+            &Text::translate("horizon.studio.export.unavailable", &[]),
+            (false, false, false),
         );
 
         // Start Export (Primary violet face)
         let export_rect = [x + self.width - 110.0, btn_y, 98.0, 18.0];
-        let export_hover = ui::hovered(
-            cursor,
-            export_rect[0],
-            export_rect[1],
-            export_rect[2],
-            export_rect[3],
-        );
         style::button(
             batch,
             atlas,
             export_rect,
-            &Text::literal("Start Export"),
-            (export_hover, true, true),
+            &Text::translate("horizon.studio.export.unavailable", &[]),
+            (false, false, true),
         );
     }
 
@@ -512,7 +499,18 @@ impl ExportUi {
             return true;
         }
 
-        // Start Export button
+        // Queue and export actions remain disabled until an encoder is available.
+        let queue_rect = [x + 78.0, btn_y, 90.0, 18.0];
+        if ui::hovered(
+            cursor,
+            queue_rect[0],
+            queue_rect[1],
+            queue_rect[2],
+            queue_rect[3],
+        ) {
+            return true;
+        }
+
         let export_rect = [x + self.width - 110.0, btn_y, 98.0, 18.0];
         if ui::hovered(
             cursor,
@@ -521,8 +519,6 @@ impl ExportUi {
             export_rect[2],
             export_rect[3],
         ) {
-            // Initiate export
-            self.open = false;
             return true;
         }
 

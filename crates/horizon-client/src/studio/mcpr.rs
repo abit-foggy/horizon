@@ -19,6 +19,8 @@ const MAX_METADATA_BYTES: u64 = 1 << 20;
 /// The most `recording.tmcpr` may inflate to. The reader streams to disk, but
 /// still caps archive expansion to protect disk space from hostile archives.
 const MAX_STREAM_BYTES: u64 = 1 << 30;
+/// Keep bundled resource packs within the same limit enforced by the reader.
+const MAX_RESOURCE_PACK_BYTES: u64 = 512 * 1024 * 1024;
 /// Keep one seek anchor for every group of this many packets.
 const STREAM_INDEX_STRIDE: usize = 1024;
 /// How much recording time a stream and its metadata may hold in memory before
@@ -129,6 +131,35 @@ fn sibling(dest: &Path, suffix: &str) -> PathBuf {
     dest.with_file_name(name)
 }
 
+fn create_private_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+pub(super) fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(bytes)?;
+    Ok(())
+}
+
 /// The metadata beside a stream: `<stream>.meta.json`.
 ///
 /// It is written when recording starts, long before the archive exists, so a
@@ -192,7 +223,7 @@ impl McprWriter {
         }
         let temp_tmcpr_path = sibling(&dest_path, "tmcpr.tmp");
         let temp_meta_path = metadata_beside(&temp_tmcpr_path);
-        let file = File::create_new(&temp_tmcpr_path)?;
+        let file = create_private_file(&temp_tmcpr_path)?;
         // A writer holds its stream locked until the file closes, which the
         // operating system does even after a crash. Recovery uses that to tell
         // a leftover from a recording still being written.
@@ -301,7 +332,7 @@ impl McprWriter {
             let file = File::open(path)?;
             let mut archive = zip::ZipArchive::new(file)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            let mut output = zip::ZipWriter::new(File::create_new(&part)?);
+            let mut output = zip::ZipWriter::new(create_private_file(&part)?);
             for index in 0..archive.len() {
                 let mut entry = archive.by_index(index).map_err(io::Error::other)?;
                 let name = entry.name().map_err(io::Error::other)?.into_owned();
@@ -374,7 +405,7 @@ impl McprWriter {
         metadata.duration = self.last_timestamp_ms;
         let json = serde_json::to_vec_pretty(&metadata)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        fs::write(&self.temp_meta_path, json)
+        write_private_file(&self.temp_meta_path, &json)
     }
 
     /// Complete recording, write `metaData.json`, package into `.mcpr` ZIP,
@@ -447,7 +478,7 @@ fn package_stream(
     part: &Path,
     extras: Option<ArchiveExtras<'_>>,
 ) -> io::Result<()> {
-    let mut zip = zip::ZipWriter::new(File::create_new(part)?);
+    let mut zip = zip::ZipWriter::new(create_private_file(part)?);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
 
@@ -490,9 +521,21 @@ fn package_stream(
             zip.write_all(mods_json)?;
         }
         if let Some(resource_pack) = extras.resource_pack {
+            let pack = File::open(resource_pack)?;
+            if pack.metadata()?.len() > MAX_RESOURCE_PACK_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "embedded resource pack exceeds 512 MiB",
+                ));
+            }
             zip.start_file("resourcepack/resources.zip", options.large_file(true))?;
-            let mut pack = File::open(resource_pack)?;
-            io::copy(&mut pack, &mut zip)?;
+            let copied = io::copy(&mut pack.take(MAX_RESOURCE_PACK_BYTES + 1), &mut zip)?;
+            if copied > MAX_RESOURCE_PACK_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "embedded resource pack exceeds 512 MiB",
+                ));
+            }
         }
     }
 
@@ -601,12 +644,7 @@ impl TemporaryStream {
                 "horizon-mcpr-{}-{nanos}-{attempt}.tmcpr",
                 std::process::id()
             ));
-            match OpenOptions::new()
-                .write(true)
-                .read(true)
-                .create_new(true)
-                .open(&path)
-            {
+            match create_private_file(&path) {
                 Ok(file) => {
                     return Ok(Self {
                         path,
@@ -766,7 +804,7 @@ impl McprReader {
         let mods_json = read_optional_entry(&mut archive, "mods.json", MAX_METADATA_BYTES)?;
         // Bound embedded resource packs to avoid unbounded archive expansion.
         let resource_pack_present = match archive.by_name("resourcepack/resources.zip") {
-            Ok(entry) if entry.size() <= 512 * 1024 * 1024 => true,
+            Ok(entry) if entry.size() <= MAX_RESOURCE_PACK_BYTES => true,
             Ok(_) => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,

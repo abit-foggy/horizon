@@ -29,10 +29,23 @@ fn glfw_button(button: i32) -> i32 { button }
 fn glfw_modifiers(bits: u32) -> u32 { bits }
 struct View { mouse: (f32, f32) }
 struct Point { x: f64, y: f64 }
-struct Batch { scale: f32 }
+struct Batch { scale: f32, width: f32 }
+struct StudioFreecam { active: bool }
+struct Replay;
+impl Replay { fn seek(&mut self, _time_ms: u32) -> Result<(), ()> { Ok(()) } }
+struct StudioTimeline { dragging_playhead: bool, dragging_keyframe: Option<()>, seeks: usize }
+mod horizon_client { pub mod studio { pub enum TimelineAction { Seek(u64) } } }
+impl StudioTimeline {
+    fn handle_mouse_drag(&mut self, _cursor: (f32, f32), _width: f32, _freecam: &mut StudioFreecam) -> horizon_client::studio::TimelineAction {
+        self.seeks += 1;
+        horizon_client::studio::TimelineAction::Seek(12)
+    }
+}
 enum WindowEvent { Focused(bool) }
 struct Game { drag_button: Option<i32>, physical_buttons: HashSet<i32>, physical_keys: HashSet<i32>,
     cursor: (f32, f32), modifiers: u32, synthetic: bool, open: bool, cancel: bool, handled: usize,
+    studio_freecam: StudioFreecam, studio_replay: Option<Replay>, studio_timeline: StudioTimeline,
+    studio_rmb_down: bool,
     calls: RefCell<Vec<(i32, [f32; 2], (f32, f32))>> }
 impl Game {
     fn pad_synthetic_input(&self) -> bool { self.synthetic }
@@ -41,10 +54,12 @@ impl Game {
         assert_eq!(modifiers, 5);
         self.calls.borrow_mut().push((button, delta, view.mouse)); *canceled = self.cancel;
     }
+    fn reset_studio_playback_ticks(&mut self) {}
+    fn capture(&mut self, _capture: bool) {}
     TRACK
     DISPATCH
     fn pointer(&mut self, position: Point) -> Result<(), ()> {
-        let b = Batch { scale: 2.0 };
+        let b = Batch { scale: 2.0, width: 427.0 };
         CURSOR
         self.handled += 1; Ok(())
     }
@@ -53,9 +68,12 @@ impl Game {
 #[test]
 fn lifecycle_and_cancellation() {
     for cancel in [false, true] {
-        let mut game = Game { drag_button: None, physical_buttons: HashSet::from([0, 1]),
+            let mut game = Game { drag_button: None, physical_buttons: HashSet::from([0, 1]),
             physical_keys: HashSet::from([10]), cursor: (10.0, 10.0), modifiers: 5, synthetic: false,
-            open: true, cancel, handled: 0, calls: RefCell::new(vec![]) };
+            open: true, cancel, handled: 0, studio_freecam: StudioFreecam { active: false },
+            studio_replay: None, studio_timeline: StudioTimeline { dragging_playhead: false,
+                dragging_keyframe: None, seeks: 0 }, studio_rmb_down: false,
+            calls: RefCell::new(vec![]) };
         game.track_drag_button(0, true);
         game.track_drag_button(1, true);
         game.track_drag_button(0, false);

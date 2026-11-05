@@ -10,7 +10,6 @@ use crate::auth::AuthSession;
 use crate::studio::{Metadata, RecorderStatus, StudioRecorder};
 use horizon_protocol::{
     PROTOCOL_VERSION,
-    buf::Reader,
     connection::{ConnReader, ConnWriter, Connection, Counters},
     crypto::{generate_secret, offline_uuid, server_hash},
     packets::{Empty, configuration as cfg, handshake, login, play},
@@ -1044,8 +1043,8 @@ fn receive_play(
 /// Return the packet bytes safe to persist in a Studio recording.
 ///
 /// Unknown packets fail closed so a newly added protocol packet cannot bypass
-/// the privacy policy. `AddEntity` retains its entity id and state, but gets a
-/// fresh UUID so the recording cannot link that entity to an account UUID.
+/// the privacy policy. Entity UUID anonymization happens in `StudioRecorder`,
+/// where it can stay consistent with the local appearance sidecar.
 fn studio_recording_packet<'a>(
     packet: &play::Clientbound,
     packet_id: i32,
@@ -1054,14 +1053,7 @@ fn studio_recording_packet<'a>(
     use play::Clientbound as P;
     use std::borrow::Cow;
     match packet {
-        P::AddEntity(entity) => {
-            let mut anonymous = entity.clone();
-            anonymous.uuid = u128::from_be_bytes(generate_secret().ok()?);
-            let encoded = P::AddEntity(anonymous).encode();
-            let mut reader = Reader::new(&encoded);
-            let id = reader.varint().ok()?;
-            Some((id, Cow::Owned(reader.rest().to_vec())))
-        }
+        P::AddEntity(_) => Some((packet_id, Cow::Borrowed(payload))),
         P::CookieRequest(_)
         | P::CustomChatCompletions(_)
         | P::CustomPayload(_)
@@ -1693,38 +1685,6 @@ mod tests {
                 packet.name()
             );
         }
-    }
-
-    #[test]
-    fn studio_recording_replaces_entity_uuids_but_keeps_entity_state() {
-        let original = play::AddEntity {
-            id: 18,
-            uuid: 0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10,
-            kind: 42,
-            position: [1.0, 64.0, -2.0],
-            velocity: [0.0, 0.0, 0.0],
-            pitch: 1,
-            yaw: 2,
-            head_yaw: 3,
-            data: 4,
-        };
-        let packet = play::Clientbound::AddEntity(original.clone());
-        let (id, payload) = studio_recording_packet(&packet, packet.id(), b"unused").unwrap();
-        let play::Clientbound::AddEntity(recorded) =
-            play::Clientbound::decode(id, &payload).unwrap()
-        else {
-            panic!("sanitized packet changed type")
-        };
-
-        assert_ne!(recorded.uuid, original.uuid);
-        assert_eq!(recorded.id, original.id);
-        assert_eq!(recorded.kind, original.kind);
-        assert_eq!(recorded.position, original.position);
-        assert_eq!(recorded.velocity, original.velocity);
-        assert_eq!(recorded.pitch, original.pitch);
-        assert_eq!(recorded.yaw, original.yaw);
-        assert_eq!(recorded.head_yaw, original.head_yaw);
-        assert_eq!(recorded.data, original.data);
     }
 
     #[test]
