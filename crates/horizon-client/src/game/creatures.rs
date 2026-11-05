@@ -2396,34 +2396,6 @@ impl Game<'_> {
                         }
                     }
                 }
-                MobEvent::PufferfishSting {
-                    mob,
-                    target,
-                    amount,
-                    source,
-                    poison_ticks,
-                } => {
-                    // Pufferfish.touch: the poison and
-                    // `playSound(PUFFER_FISH_STING, 1, 1)` sit inside the
-                    // `hurtServer` branch, so only a hit that landed poisons
-                    // and stings, at the fish's own position as
-                    // `Entity.playSound` puts it, and not when it is silent.
-                    let landed = self.mob_hits_mob(target, amount, source);
-                    if landed && let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
-                        t.add_effect("minecraft:poison", poison_ticks, 0);
-                    }
-                    if landed && let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
-                        let at = [m.position.x, m.position.y, m.position.z];
-                        if !m.silent {
-                            self.handle_mob_events(vec![MobEvent::Sound(
-                                "entity.puffer_fish.sting",
-                                at,
-                                1.0,
-                                1.0,
-                            )])?;
-                        }
-                    }
-                }
                 MobEvent::SonicBoom {
                     target,
                     attacker,
@@ -3001,7 +2973,9 @@ impl Game<'_> {
                     }
                 }
                 // Applied after the fish's tick (`apply_brain_events`).
-                MobEvent::StartFollowing { .. } | MobEvent::SchoolSize { .. } => {}
+                MobEvent::StartFollowing { .. }
+                | MobEvent::SchoolSize { .. }
+                | MobEvent::PufferfishSting { .. } => {}
                 MobEvent::LeashBreak { mob, drop, sound } => self.break_leash(mob, drop, sound),
                 MobEvent::NotifyLeashHolder { holder } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == holder) {
@@ -3462,8 +3436,7 @@ impl Game<'_> {
                     };
                 }
                 self.world.random = r;
-                let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-                self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+                self.breeding_orb(parent, [p.position.x, p.position.y, p.position.z]);
                 return;
             }
             if p.species() == Species::Cat {
@@ -3489,8 +3462,7 @@ impl Game<'_> {
                         c.extra.color = mixed;
                     }
                 }
-                let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-                self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+                self.breeding_orb(parent, [p.position.x, p.position.y, p.position.z]);
                 return;
             }
             if p.species() == Species::Wolf {
@@ -3517,23 +3489,20 @@ impl Game<'_> {
                         c.extra.color = mixed;
                     }
                 }
-                let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-                self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+                self.breeding_orb(parent, [p.position.x, p.position.y, p.position.z]);
                 return;
             }
             // Panda.getBreedOffspring: genes from both parents.
             if p.species() == Species::Panda {
                 horizon_client::mobs::panda::inherit(child, &p, q.as_ref().unwrap_or(&p));
-                let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-                self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+                self.breeding_orb(parent, [p.position.x, p.position.y, p.position.z]);
                 return;
             }
             // Axolotl.getBreedOffspring: the drawn variant, and the baby is persistent.
             if let Some(variant) = axolotl {
                 child.extra.variant = variant;
                 child.persistent = true;
-                let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-                self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+                self.breeding_orb(parent, [p.position.x, p.position.y, p.position.z]);
                 return;
             }
             // Nautilus.getBreedOffspring: a tame parent's baby is tame too.
@@ -3569,8 +3538,17 @@ impl Game<'_> {
                 }
             }
         }
-        let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-        self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+        self.breeding_orb(parent, [p.position.x, p.position.y, p.position.z]);
+    }
+    /// `Animal.finalizeSpawnChildFromBreeding`'s experience, from the breeding
+    /// parent's own random, and only when the `mob_drops` game rule is on.
+    fn breeding_orb(&mut self, parent: u32, at: [f64; 3]) {
+        if self.ui.rules.bool("mob_drops")
+            && let Some(m) = self.mobs.iter_mut().find(|m| m.id == parent)
+        {
+            let xp = 1 + m.random.next_int_bound(7).unwrap_or(0) as u32;
+            self.spawn_orbs(at, xp);
+        }
     }
     /// `MobEffectUtil.addEffectToPlayersAround` for an elder guardian:
     /// mining fatigue III for five minutes unless a stronger or longer one

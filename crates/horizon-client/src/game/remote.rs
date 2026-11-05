@@ -6382,6 +6382,7 @@ impl Game<'_> {
         if running {
             self.tick_particles();
         }
+        self.tick_frame_visuals(running);
         // Under `HORIZON_STILL` they wait for the world too: endermen's and blazes' particles
         // draw on the particles' random, and effects count down, on every tick a frozen
         // client runs, as many as the run took to get there.
@@ -6485,7 +6486,7 @@ impl Game<'_> {
         // reaches its own write when this window is a server client.
         self.rope_rot_old = (self.yaw, self.pitch);
         // A passenger moves with its vehicle (Entity.rideTick), not by itself.
-        let riding = self.screen != Screen::Dead && self.remote_ride(keys);
+        let riding = self.screen != Screen::Dead && self.remote_ride(keys, sprint_window)?;
         // The server sends no passenger's position: they sit where their
         // vehicles are now.
         self.position_riders();
