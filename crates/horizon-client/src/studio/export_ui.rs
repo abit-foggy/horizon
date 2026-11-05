@@ -30,12 +30,12 @@ impl ExportResolution {
         }
     }
 
-    pub fn label(self) -> &'static str {
+    pub fn translation_key(self) -> &'static str {
         match self {
-            Self::Res720p => "1280x720 (720p)",
-            Self::Res1080p => "1920x1080 (1080p)",
-            Self::Res1440p => "2560x1440 (1440p)",
-            Self::Res4k => "3840x2160 (4K UHD)",
+            Self::Res720p => "horizon.studio.export.resolution.720p",
+            Self::Res1080p => "horizon.studio.export.resolution.1080p",
+            Self::Res1440p => "horizon.studio.export.resolution.1440p",
+            Self::Res4k => "horizon.studio.export.resolution.4k",
         }
     }
 
@@ -57,10 +57,10 @@ pub enum ContainerFormat {
 }
 
 impl ContainerFormat {
-    pub fn label(self) -> &'static str {
+    pub fn translation_key(self) -> &'static str {
         match self {
-            Self::Mp4 => "MP4 (.mp4)",
-            Self::Mkv => "Matroska (.mkv)",
+            Self::Mp4 => "horizon.studio.export.container.mp4",
+            Self::Mkv => "horizon.studio.export.container.mkv",
         }
     }
 
@@ -82,12 +82,12 @@ pub enum VideoCodec {
 }
 
 impl VideoCodec {
-    pub fn label(self) -> &'static str {
+    pub fn translation_key(self) -> &'static str {
         match self {
-            Self::H264 => "H.264 / AVC",
-            Self::Hevc => "H.265 / HEVC",
-            Self::ProRes => "Apple ProRes",
-            Self::Av1 => "AV1",
+            Self::H264 => "horizon.studio.export.codec.h264",
+            Self::Hevc => "horizon.studio.export.codec.hevc",
+            Self::ProRes => "horizon.studio.export.codec.prores",
+            Self::Av1 => "horizon.studio.export.codec.av1",
         }
     }
 
@@ -109,10 +109,10 @@ pub enum EncoderBackend {
 }
 
 impl EncoderBackend {
-    pub fn label(self) -> &'static str {
+    pub fn translation_key(self) -> &'static str {
         match self {
-            Self::Software => "Software (CPU)",
-            Self::Hardware => "Hardware (GPU)",
+            Self::Software => "horizon.studio.export.encoder.software",
+            Self::Hardware => "horizon.studio.export.encoder.hardware",
         }
     }
 
@@ -213,7 +213,7 @@ impl ExportUi {
         );
         batch.text_styled(
             atlas,
-            &Text::literal("Export to video"),
+            &Text::translate("horizon.studio.export.title", &[]),
             x + 12.0,
             y + 6.0,
             style::WHITE,
@@ -233,7 +233,7 @@ impl ExportUi {
             batch,
             atlas,
             close_rect,
-            &Text::literal("x"),
+            &Text::literal("×"),
             (close_hover, true, false),
         );
 
@@ -253,12 +253,11 @@ impl ExportUi {
             right,
             ctrl_w,
             ctrl_h,
-            "Resolution",
-            self.settings.resolution.label(),
+            "horizon.studio.export.resolution",
+            Text::translate(self.settings.resolution.translation_key(), &[]),
         );
 
         // Start / End Tick
-        let tick_str = format!("{} .. {}", self.settings.start_tick, self.settings.end_tick);
         self.render_row_button(
             batch,
             atlas,
@@ -268,12 +267,17 @@ impl ExportUi {
             right,
             ctrl_w,
             ctrl_h,
-            "Tick Range",
-            &tick_str,
+            "horizon.studio.export.tick_range",
+            Text::translate(
+                "horizon.studio.export.tick_range_value",
+                &[
+                    Text::literal(self.settings.start_tick.to_string()),
+                    Text::literal(self.settings.end_tick.to_string()),
+                ],
+            ),
         );
 
         // Framerate
-        let fps_str = format!("{} FPS", self.settings.fps);
         self.render_row_button(
             batch,
             atlas,
@@ -283,8 +287,11 @@ impl ExportUi {
             right,
             ctrl_w,
             ctrl_h,
-            "Framerate",
-            &fps_str,
+            "horizon.studio.export.framerate",
+            Text::translate(
+                "horizon.studio.export.framerate_value",
+                &[Text::literal(self.settings.fps.to_string())],
+            ),
         );
 
         // Reset RNG Checkbox
@@ -294,7 +301,7 @@ impl ExportUi {
             x,
             &mut fy,
             right,
-            "Reset RNG",
+            "horizon.studio.export.reset_rng",
             self.settings.reset_rng,
         );
 
@@ -308,8 +315,8 @@ impl ExportUi {
             right,
             ctrl_w,
             ctrl_h,
-            "Container",
-            self.settings.container.label(),
+            "horizon.studio.export.container",
+            Text::translate(self.settings.container.translation_key(), &[]),
         );
 
         // Video Codec
@@ -322,8 +329,8 @@ impl ExportUi {
             right,
             ctrl_w,
             ctrl_h,
-            "Video Codec",
-            self.settings.codec.label(),
+            "horizon.studio.export.codec",
+            Text::translate(self.settings.codec.translation_key(), &[]),
         );
 
         // Encoder Backend
@@ -336,12 +343,11 @@ impl ExportUi {
             right,
             ctrl_w,
             ctrl_h,
-            "Encoder",
-            self.settings.encoder.label(),
+            "horizon.studio.export.encoder",
+            Text::translate(self.settings.encoder.translation_key(), &[]),
         );
 
         // Bitrate
-        let bitrate_str = format!("{} kbps", self.settings.bitrate_kbps);
         self.render_row_button(
             batch,
             atlas,
@@ -351,8 +357,11 @@ impl ExportUi {
             right,
             ctrl_w,
             ctrl_h,
-            "Bitrate",
-            &bitrate_str,
+            "horizon.studio.export.bitrate",
+            Text::translate(
+                "horizon.studio.export.bitrate_value",
+                &[Text::literal(self.settings.bitrate_kbps.to_string())],
+            ),
         );
 
         // Record Audio Checkbox
@@ -362,7 +371,7 @@ impl ExportUi {
             x,
             &mut fy,
             right,
-            "Record Audio",
+            "horizon.studio.export.record_audio",
             self.settings.record_audio,
         );
 
@@ -382,7 +391,7 @@ impl ExportUi {
             batch,
             atlas,
             cancel_rect,
-            &Text::literal("Cancel"),
+            &Text::translate("gui.cancel", &[]),
             (cancel_hover, true, false),
         );
 
@@ -419,11 +428,11 @@ impl ExportUi {
         w: f32,
         h: f32,
         label: &str,
-        val: &str,
+        val: Text,
     ) {
         batch.text_styled(
             atlas,
-            &Text::literal(label),
+            &Text::translate(label, &[]),
             x + 14.0,
             *fy + 2.0,
             style::WHITE,
@@ -431,13 +440,7 @@ impl ExportUi {
         );
         let btn_rect = [right - w, *fy, w, h];
         let hover = ui::hovered(cursor, btn_rect[0], btn_rect[1], btn_rect[2], btn_rect[3]);
-        style::button(
-            batch,
-            atlas,
-            btn_rect,
-            &Text::literal(val),
-            (hover, true, false),
-        );
+        style::button(batch, atlas, btn_rect, &val, (hover, true, false));
         *fy += h + 5.0;
     }
 
@@ -453,7 +456,7 @@ impl ExportUi {
     ) {
         batch.text_styled(
             atlas,
-            &Text::literal(label),
+            &Text::translate(label, &[]),
             x + 14.0,
             *fy + 2.0,
             style::WHITE,

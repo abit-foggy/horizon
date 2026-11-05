@@ -87,7 +87,7 @@ impl TopBarUi {
         // 2. Studio Title Brand
         batch.text_styled(
             atlas,
-            &Text::literal("✦ Studio"),
+            &Text::translate("horizon.studio.topbar.title", &[]),
             8.0,
             6.0,
             style::WHITE,
@@ -96,9 +96,14 @@ impl TopBarUi {
 
         // 3. Menu Bar Items: File, Camera, View
         let menus = [
-            (TopBarMenu::File, "File", 80.0, 36.0),
-            (TopBarMenu::Camera, "Camera", 120.0, 52.0),
-            (TopBarMenu::View, "View", 176.0, 40.0),
+            (TopBarMenu::File, "horizon.studio.topbar.file", 80.0, 36.0),
+            (
+                TopBarMenu::Camera,
+                "horizon.studio.topbar.camera",
+                120.0,
+                52.0,
+            ),
+            (TopBarMenu::View, "horizon.studio.topbar.view", 176.0, 40.0),
         ];
 
         for (menu, title, x, btn_w) in menus {
@@ -115,7 +120,14 @@ impl TopBarUi {
             } else {
                 style::GREY
             };
-            batch.text_styled(atlas, &Text::literal(title), x + 6.0, 6.0, text_color, true);
+            batch.text_styled(
+                atlas,
+                &Text::translate(title, &[]),
+                x + 6.0,
+                6.0,
+                text_color,
+                true,
+            );
         }
 
         // 4. Game Pause Menu Button
@@ -137,7 +149,7 @@ impl TopBarUi {
         };
         batch.text_styled(
             atlas,
-            &Text::literal("⏸ Pause Menu"),
+            &Text::translate("horizon.studio.topbar.pause_menu", &[]),
             pause_x + 6.0,
             6.0,
             pause_color,
@@ -157,7 +169,7 @@ impl TopBarUi {
         let exit_key = horizon_client::keybinds::display_name(keys.get("key.studio.exit")).plain();
         batch.text_styled(
             atlas,
-            &Text::literal(format!("Exit ({exit_key})")),
+            &Text::translate("horizon.studio.topbar.exit", &[Text::literal(exit_key)]),
             exit_x + 8.0,
             6.0,
             style::WHITE,
@@ -217,79 +229,83 @@ impl TopBarUi {
         path_locked: bool,
         keys: &horizon_client::keybinds::KeyBinds,
     ) {
-        let shortcut = |mapping: &str, modifier: &str| {
+        let shortcut = |mapping: &str, modifier_key: Option<&str>| {
             let key = horizon_client::keybinds::display_name(keys.get(mapping)).plain();
-            if modifier.is_empty() {
-                key
-            } else {
-                format!("{modifier}+{key}")
-            }
+            modifier_key.map_or(key.clone(), |modifier| {
+                format!("{}+{key}", Text::translate(modifier, &[]).plain())
+            })
         };
-        let (x, items): (f32, Vec<(String, String)>) = match menu {
+        let (x, items): (f32, Vec<(&str, String)>) = match menu {
             TopBarMenu::File => (
                 80.0,
                 vec![
                     (
-                        "🎬 Export Video...".into(),
-                        shortcut("key.studio.export", "Ctrl"),
+                        "horizon.studio.topbar.export_video",
+                        shortcut("key.studio.export", Some("horizon.studio.shortcut.control")),
                     ),
-                    ("📁 Open Recordings Folder".into(), String::new()),
-                    ("horizon.studio.settings.open".into(), String::new()),
+                    ("horizon.studio.topbar.open_recordings", String::new()),
+                    ("horizon.studio.settings.open", String::new()),
                     (
-                        "⏸ Game Pause Menu".into(),
-                        shortcut("key.studio.pauseMenu", ""),
+                        "horizon.studio.topbar.game_pause_menu",
+                        shortcut("key.studio.pauseMenu", None),
                     ),
-                    ("✕ Close Replay".into(), shortcut("key.studio.exit", "")),
+                    (
+                        "horizon.studio.topbar.close_replay",
+                        shortcut("key.studio.exit", None),
+                    ),
                 ],
             ),
             TopBarMenu::Camera => (
                 120.0,
                 vec![
                     (
-                        "horizon.studio.topbar.toggle_freecam".into(),
-                        shortcut("key.studio.toggleFreecam", ""),
+                        "horizon.studio.topbar.toggle_freecam",
+                        shortcut("key.studio.toggleFreecam", None),
                     ),
                     (
-                        "👤 Reset to Player".into(),
-                        shortcut("key.studio.resetCamera", ""),
+                        "horizon.studio.topbar.reset_to_player",
+                        shortcut("key.studio.resetCamera", None),
                     ),
                     (
                         if path_locked {
-                            "🔓 Unlock Freecam".into()
+                            "horizon.studio.topbar.unlock_freecam"
                         } else {
-                            "🔒 Lock to Spline".into()
+                            "horizon.studio.topbar.lock_to_spline"
                         },
-                        shortcut("key.studio.togglePathLock", ""),
+                        shortcut("key.studio.togglePathLock", None),
                     ),
                     (
-                        "➕ Add Keyframe".into(),
-                        shortcut("key.studio.addKeyframe", ""),
+                        "horizon.studio.topbar.add_keyframe",
+                        shortcut("key.studio.addKeyframe", None),
                     ),
                     (
-                        "horizon.studio.topbar.add_marker".into(),
-                        shortcut("key.studio.addMarker", ""),
+                        "horizon.studio.topbar.add_marker",
+                        shortcut("key.studio.addMarker", None),
                     ),
-                    ("🗑 Clear Keyframes".into(), String::new()),
+                    ("horizon.studio.topbar.clear_keyframes", String::new()),
                 ],
             ),
             TopBarMenu::View => (
                 176.0,
                 vec![
                     (
-                        "📐 Framing Guides".into(),
-                        shortcut("key.studio.cycleGuides", ""),
+                        "horizon.studio.topbar.framing_guides",
+                        shortcut("key.studio.cycleGuides", None),
                     ),
                     (
-                        "⬛ Aspect Ratio Matte".into(),
-                        shortcut("key.studio.cycleAspectRatio", "Shift"),
+                        "horizon.studio.topbar.aspect_ratio_matte",
+                        shortcut(
+                            "key.studio.cycleAspectRatio",
+                            Some("horizon.studio.shortcut.shift"),
+                        ),
                     ),
                     (
-                        "🎛 Visuals Sidebar".into(),
-                        shortcut("key.studio.toggleVisuals", ""),
+                        "horizon.studio.topbar.visuals_sidebar",
+                        shortcut("key.studio.toggleVisuals", None),
                     ),
                     (
-                        "⏱ Timeline HUD".into(),
-                        shortcut("key.studio.toggleTimeline", ""),
+                        "horizon.studio.topbar.timeline_hud",
+                        shortcut("key.studio.toggleTimeline", None),
                     ),
                 ],
             ),
@@ -328,11 +344,7 @@ impl TopBarUi {
             } else {
                 style::MUTED
             };
-            let label_text = if label.starts_with("horizon.") {
-                Text::translate(label, &[])
-            } else {
-                Text::literal(label)
-            };
+            let label_text = Text::translate(label, &[]);
             batch.text_styled(atlas, &label_text, x + 8.0, item_y + 6.0, text_color, true);
 
             if !shortcut.is_empty() {

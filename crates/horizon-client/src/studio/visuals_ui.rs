@@ -22,13 +22,13 @@ pub enum AspectRatio {
 }
 
 impl AspectRatio {
-    pub fn name(self) -> &'static str {
+    pub fn translation_key(self) -> &'static str {
         match self {
-            Self::None => "None",
-            Self::Ratio16_9 => "16:9",
-            Self::Ratio4_3 => "4:3",
-            Self::Ratio1_1 => "1:1",
-            Self::Ratio21_9 => "21:9",
+            Self::None => "horizon.studio.visuals.aspect_ratio.none",
+            Self::Ratio16_9 => "horizon.studio.visuals.aspect_ratio.16_9",
+            Self::Ratio4_3 => "horizon.studio.visuals.aspect_ratio.4_3",
+            Self::Ratio1_1 => "horizon.studio.visuals.aspect_ratio.1_1",
+            Self::Ratio21_9 => "horizon.studio.visuals.aspect_ratio.21_9",
         }
     }
 
@@ -246,7 +246,7 @@ impl VisualsUi {
 
         batch.text_styled(
             atlas,
-            &Text::literal("Visuals & Overrides"),
+            &Text::translate("horizon.studio.visuals.title", &[]),
             panel_x + 8.0,
             5.0,
             style::WHITE,
@@ -266,7 +266,7 @@ impl VisualsUi {
             batch,
             atlas,
             close_rect,
-            &Text::literal("x"),
+            &Text::literal("×"),
             (close_hover, true, false),
         );
 
@@ -275,14 +275,20 @@ impl VisualsUi {
         let right = panel_x + self.width - 8.0;
 
         // Group 1: GUI
-        self.render_section_header(batch, atlas, panel_x, &mut y, "GUI");
+        self.render_section_header(
+            batch,
+            atlas,
+            panel_x,
+            &mut y,
+            "horizon.studio.visuals.section.gui",
+        );
         self.render_toggle_row(
             batch,
             atlas,
             panel_x,
             &mut y,
             right,
-            "Chat",
+            "horizon.studio.visuals.chat",
             self.settings.gui_chat,
         );
         self.render_toggle_row(
@@ -291,7 +297,7 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "Boss Bar",
+            "horizon.studio.visuals.boss_bar",
             self.settings.gui_boss_bar,
         );
         self.render_toggle_row(
@@ -300,19 +306,25 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "Scoreboard",
+            "horizon.studio.visuals.scoreboard",
             self.settings.gui_scoreboard,
         );
 
         // Group 2: World
-        self.render_section_header(batch, atlas, panel_x, &mut y, "World");
+        self.render_section_header(
+            batch,
+            atlas,
+            panel_x,
+            &mut y,
+            "horizon.studio.visuals.section.world",
+        );
         self.render_toggle_row(
             batch,
             atlas,
             panel_x,
             &mut y,
             right,
-            "Render Blocks",
+            "horizon.studio.visuals.render_blocks",
             self.settings.world_blocks,
         );
         self.render_toggle_row(
@@ -321,7 +333,7 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "Entities",
+            "horizon.studio.visuals.entities",
             self.settings.world_entities,
         );
         self.render_toggle_row(
@@ -330,7 +342,7 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "Players",
+            "horizon.studio.visuals.players",
             self.settings.world_players,
         );
         self.render_toggle_row(
@@ -339,7 +351,7 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "Sky",
+            "horizon.studio.visuals.sky",
             self.settings.world_sky,
         );
         self.render_toggle_row(
@@ -348,19 +360,25 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "Nametags",
+            "horizon.studio.visuals.nametags",
             self.settings.world_nametags,
         );
 
         // Group 3: Overrides
-        self.render_section_header(batch, atlas, panel_x, &mut y, "Overrides");
+        self.render_section_header(
+            batch,
+            atlas,
+            panel_x,
+            &mut y,
+            "horizon.studio.visuals.section.overrides",
+        );
         self.render_toggle_row(
             batch,
             atlas,
             panel_x,
             &mut y,
             right,
-            "Fog",
+            "horizon.studio.visuals.fog",
             self.settings.override_fog,
         );
         self.render_toggle_row(
@@ -369,7 +387,7 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "FOV",
+            "horizon.studio.visuals.fov",
             self.settings.override_fov,
         );
         self.render_toggle_row(
@@ -378,7 +396,7 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "Time of Day",
+            "horizon.studio.visuals.time_of_day",
             self.settings.override_time,
         );
         self.render_toggle_row(
@@ -387,19 +405,25 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "Shake",
+            "horizon.studio.visuals.shake",
             self.settings.override_shake,
         );
 
         // Group 4: Guides & Other
-        self.render_section_header(batch, atlas, panel_x, &mut y, "Guides & Other");
+        self.render_section_header(
+            batch,
+            atlas,
+            panel_x,
+            &mut y,
+            "horizon.studio.visuals.section.guides_other",
+        );
         self.render_toggle_row(
             batch,
             atlas,
             panel_x,
             &mut y,
             right,
-            "Rule of Thirds",
+            "horizon.studio.visuals.rule_of_thirds",
             self.settings.guide_rule_of_thirds,
         );
         self.render_toggle_row(
@@ -408,7 +432,7 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "Center Guide",
+            "horizon.studio.visuals.center_guide",
             self.settings.guide_center,
         );
         self.render_toggle_row(
@@ -417,7 +441,7 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "3D Camera Path",
+            "horizon.studio.visuals.camera_path_3d",
             self.settings.camera_path_3d,
         );
 
@@ -432,7 +456,7 @@ impl VisualsUi {
         );
         batch.text_styled(
             atlas,
-            &Text::literal("Aspect Ratio"),
+            &Text::translate("horizon.studio.visuals.aspect_ratio", &[]),
             panel_x + 8.0,
             y + 2.0,
             style::MUTED,
@@ -442,7 +466,7 @@ impl VisualsUi {
             batch,
             atlas,
             aspect_rect,
-            &Text::literal(self.settings.aspect_ratio.name()),
+            &Text::translate(self.settings.aspect_ratio.translation_key(), &[]),
             (aspect_hover, true, false),
         );
     }
@@ -464,7 +488,7 @@ impl VisualsUi {
         );
         batch.text_styled(
             atlas,
-            &Text::literal(title),
+            &Text::translate(title, &[]),
             panel_x + 8.0,
             *y,
             style::SOFT,
@@ -485,7 +509,7 @@ impl VisualsUi {
     ) {
         batch.text_styled(
             atlas,
-            &Text::literal(label),
+            &Text::translate(label, &[]),
             panel_x + 10.0,
             *y + 2.0,
             style::WHITE,

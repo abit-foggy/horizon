@@ -24,13 +24,13 @@ pub enum TimelineTrackKind {
 }
 
 impl TimelineTrackKind {
-    pub fn name(self) -> &'static str {
+    pub fn translation_key(self) -> &'static str {
         match self {
-            Self::Sequence => "Sequence",
-            Self::Camera => "Camera",
-            Self::Fov => "FOV",
-            Self::Timelapse => "Timelapse",
-            Self::Shake => "Shake",
+            Self::Sequence => "horizon.studio.timeline.track.sequence",
+            Self::Camera => "horizon.studio.timeline.track.camera",
+            Self::Fov => "horizon.studio.timeline.track.fov",
+            Self::Timelapse => "horizon.studio.timeline.track.timelapse",
+            Self::Shake => "horizon.studio.timeline.track.shake",
         }
     }
 }
@@ -245,14 +245,14 @@ impl TimelineUi {
         let btn_w = 18.0;
         let btn_h = 16.0;
         let buttons = [
-            ("|<<", "Start"),
-            ("<<", "-1s"),
-            (if self.playing { "||" } else { ">" }, "Play/Pause"),
-            (">>", "+1s"),
-            (">>|", "End"),
+            "|<<",
+            "<<",
+            if self.playing { "||" } else { ">" },
+            ">>",
+            ">>|",
         ];
 
-        for (label, _hint) in buttons {
+        for label in buttons {
             let rect = [x, y, btn_w, btn_h];
             let hover = ui::hovered(cursor, x, y, btn_w, btn_h);
             style::button(
@@ -301,18 +301,24 @@ impl TimelineUi {
         x += 38.0;
 
         // Freecam Toggle Button
-        let freecam_label = if freecam.active {
-            "Freecam: ON"
-        } else {
-            "Freecam: OFF"
-        };
+        let freecam_label = Text::translate(
+            "horizon.studio.timeline.freecam",
+            &[Text::translate(
+                if freecam.active {
+                    "horizon.studio.state.on"
+                } else {
+                    "horizon.studio.state.off"
+                },
+                &[],
+            )],
+        );
         let freecam_rect = [x, y, 78.0, btn_h];
         let freecam_hover = ui::hovered(cursor, x, y, 78.0, btn_h);
         style::button(
             batch,
             atlas,
             freecam_rect,
-            &Text::literal(freecam_label),
+            &freecam_label,
             (freecam_hover, true, freecam.active),
         );
         x += 84.0;
@@ -324,7 +330,7 @@ impl TimelineUi {
             batch,
             atlas,
             [x, y, add_w, btn_h],
-            &Text::literal("+ Key"),
+            &Text::translate("horizon.studio.timeline.add_keyframe_short", &[]),
             (add_hover, true, false),
         );
         x += add_w + 3.0;
@@ -336,7 +342,7 @@ impl TimelineUi {
             batch,
             atlas,
             [x, y, del_w, btn_h],
-            &Text::literal("- Del"),
+            &Text::translate("horizon.studio.timeline.delete_keyframe_short", &[]),
             (del_hover, has_sel, has_sel),
         );
         x += del_w + 3.0;
@@ -347,7 +353,7 @@ impl TimelineUi {
             batch,
             atlas,
             [x, y, split_w, btn_h],
-            &Text::literal("Split"),
+            &Text::translate("horizon.studio.timeline.split", &[]),
             (split_hover, true, false),
         );
 
@@ -359,7 +365,7 @@ impl TimelineUi {
             batch,
             atlas,
             [export_x, y, export_w, btn_h],
-            &Text::literal("Export..."),
+            &Text::translate("horizon.studio.timeline.export", &[]),
             (export_hover, true, true), // Primary violet accent button
         );
 
@@ -370,7 +376,7 @@ impl TimelineUi {
             batch,
             atlas,
             [visuals_x, y, visuals_w, btn_h],
-            &Text::literal("Visuals"),
+            &Text::translate("horizon.studio.timeline.visuals", &[]),
             (visuals_hover, true, false),
         );
     }
@@ -408,15 +414,11 @@ impl TimelineUi {
                 };
 
                 if is_labeled {
-                    let lbl = format!("{}s", sec as u32);
-                    batch.text_styled(
-                        atlas,
-                        &Text::literal(&lbl),
-                        tx + 2.0,
-                        y + 1.0,
-                        style::SOFT,
-                        true,
+                    let lbl = Text::translate(
+                        "horizon.studio.timeline.seconds",
+                        &[Text::literal((sec as u32).to_string())],
                     );
+                    batch.text_styled(atlas, &lbl, tx + 2.0, y + 1.0, style::SOFT, true);
                 }
             }
             sec += sec_step;
@@ -438,19 +440,15 @@ impl TimelineUi {
 
         // Track label column
         let num_scenes = self.split_points.len() + 1;
-        let track_lbl = if num_scenes > 1 {
-            format!("{num_scenes} Scenes")
+        let track_label = if num_scenes > 1 {
+            Text::translate(
+                "horizon.studio.timeline.scene_count",
+                &[Text::literal(num_scenes.to_string())],
+            )
         } else {
-            "Sequence".to_string()
+            Text::translate("horizon.studio.timeline.track.sequence", &[])
         };
-        batch.text_styled(
-            atlas,
-            &Text::literal(&track_lbl),
-            6.0,
-            y + 6.0,
-            style::WHITE,
-            true,
-        );
+        batch.text_styled(atlas, &track_label, 6.0, y + 6.0, style::WHITE, true);
 
         // Base lane well
         let lane_rect = [start_x, y, track_w, bar_h];
@@ -501,10 +499,13 @@ impl TimelineUi {
 
             // Scene name badge inside clip
             if seg_w > 45.0 {
-                let scene_title = format!("Scene {}", idx + 1);
+                let scene_title = Text::translate(
+                    "horizon.studio.timeline.scene_title",
+                    &[Text::literal((idx + 1).to_string())],
+                );
                 batch.text_styled(
                     atlas,
-                    &Text::literal(&scene_title),
+                    &scene_title,
                     seg_x + 5.0,
                     y + 5.0,
                     style::MUTED,

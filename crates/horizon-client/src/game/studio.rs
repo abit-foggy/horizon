@@ -748,13 +748,13 @@ impl Game<'_> {
     }
 
     pub(super) fn open_studio_replay(&mut self, path: &str) -> Result<Value> {
-        if self.remote.is_none()
-            && let Err(e) = self.init_remote_for_replay()
-        {
-            log::warn!("Failed to init remote for replay: {e}");
-        }
         match ReplayDriver::open(Path::new(path)) {
             Ok(driver) => {
+                if self.remote.is_none()
+                    && let Err(e) = self.init_remote_for_replay()
+                {
+                    log::warn!("Failed to init remote for replay: {e}");
+                }
                 let duration_ms = driver.duration_ms();
                 let packets = driver.packet_count();
                 if let Some(filename) = Path::new(path).file_name() {
@@ -808,6 +808,8 @@ impl Game<'_> {
             }
             Err(e) => {
                 log::error!("Failed to open studio replay '{path}': {e}");
+                let reason = e.to_string();
+                self.system_message(Text::tr("horizon.studio.replay.open_error", &[&reason]));
                 Ok(json!({ "ok": false, "error": e.to_string() }))
             }
         }
