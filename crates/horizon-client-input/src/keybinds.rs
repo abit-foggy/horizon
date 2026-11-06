@@ -23,6 +23,8 @@ pub const MAPPINGS: &[(&str, &str, &str)] = &[
     ("key.pickItem", "key.mouse.middle", "gameplay"),
     ("key.command", "key.keyboard.slash", "multiplayer"),
     ("key.friends", "key.keyboard.o", "multiplayer"),
+    // Horizon's emote wheel (docs/cosmetics.md), on a key vanilla leaves free.
+    ("key.emote", "key.keyboard.b", "multiplayer"),
     ("key.socialInteractions", "key.keyboard.p", "multiplayer"),
     ("key.toggleGui", "key.keyboard.f1", "misc"),
     (
@@ -87,6 +89,19 @@ pub const MAPPINGS: &[(&str, &str, &str)] = &[
     ("key.studio.toggleTimeline", "key.keyboard.t", "studio"),
     ("key.studio.addMarker", "key.keyboard.m", "studio"),
     ("key.studio.exit", "key.keyboard.escape", "studio"),
+    ("key.studio.moveForward", "key.keyboard.w", "studio"),
+    ("key.studio.moveBack", "key.keyboard.s", "studio"),
+    ("key.studio.moveLeft", "key.keyboard.a", "studio"),
+    ("key.studio.moveRight", "key.keyboard.d", "studio"),
+    ("key.studio.moveUp", "key.keyboard.e", "studio"),
+    ("key.studio.moveUpAlt", "key.keyboard.space", "studio"),
+    ("key.studio.moveDown", "key.keyboard.q", "studio"),
+    (
+        "key.studio.moveDownAlt",
+        "key.keyboard.left.shift",
+        "studio",
+    ),
+    ("key.studio.fastMove", "key.keyboard.left.control", "studio"),
 ];
 /// Mappings Options builds as `ToggleKeyMapping` (hold or toggle by option).
 pub fn is_toggle(name: &str) -> bool {
@@ -455,6 +470,18 @@ impl KeyBinds {
         }
         vec![Ok(key)]
     }
+    /// `Minecraft.handleKeybinds`: key.pickItem and key.spectatorHotbar share the middle button by
+    /// default and are separate mappings, so a press of what `input` is bound to acts only as the
+    /// one this player can use: the spectator hotbar for a spectator, pick block otherwise. (Pick
+    /// block does nothing a spectator would see.)
+    pub fn middle_acts(&self, input: &str, spectator: bool) -> bool {
+        let mapping = if spectator {
+            "key.spectatorHotbar"
+        } else {
+            "key.pickItem"
+        };
+        self.get(mapping) == input
+    }
     /// Translate a mouse button the same way (keys bound to mouse buttons).
     pub fn translate_mouse(&self, button: MouseButton) -> Option<Result<KeyCode, MouseButton>> {
         self.translate_mouse_all(button).into_iter().next()
@@ -518,6 +545,27 @@ impl KeyBinds {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mappings_sharing_the_middle_button_act_as_themselves() {
+        let middle = "key.mouse.middle";
+        let z = "key.keyboard.z";
+        let mut keys = KeyBinds::default();
+        assert!(keys.middle_acts(middle, false) && keys.middle_acts(middle, true));
+        // The spectator hotbar on Z: the middle button only picks, and Z never picks.
+        keys.set("key.spectatorHotbar", z);
+        assert!(keys.middle_acts(middle, false));
+        assert!(!keys.middle_acts(middle, true));
+        assert!(keys.middle_acts(z, true));
+        assert!(!keys.middle_acts(z, false));
+        // Pick block on Z instead: the other way round.
+        keys.reset_all();
+        keys.set("key.pickItem", z);
+        assert!(keys.middle_acts(z, false));
+        assert!(!keys.middle_acts(z, true));
+        assert!(keys.middle_acts(middle, true));
+        assert!(!keys.middle_acts(middle, false));
+    }
     #[test]
     fn studio_bindings_are_configurable_and_do_not_remap_gameplay_keys() {
         let mut keys = KeyBinds::default();
@@ -529,6 +577,9 @@ mod tests {
         assert_eq!(keys.get("key.studio.addMarker"), "key.keyboard.z");
         assert_eq!(keys.translate_all(KeyCode::KeyZ), [Ok(KeyCode::KeyZ)]);
         assert_eq!(keys.translate_all(KeyCode::KeyM), [Ok(KeyCode::KeyM)]);
+        keys.set("key.studio.moveForward", "key.keyboard.i");
+        assert_eq!(keys.get("key.studio.moveForward"), "key.keyboard.i");
+        assert_eq!(keys.translate_all(KeyCode::KeyI), [Ok(KeyCode::KeyI)]);
     }
 
     #[test]

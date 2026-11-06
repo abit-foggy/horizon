@@ -71,6 +71,7 @@ expect_seconds = 10          # how long a player the proxy announced is waited f
 max_expect_seconds = 60      # the longest the proxy may ask for
 max_expected = 64            # players waited for at once
 max_freeze_seconds = 30      # the longest a player stays frozen while it is handed over
+max_hold_seconds = 60        # the longest a player arriving from another server is held before it is dropped
 
 # Post the chat, joins, leaves and deaths to a Discord channel, drawn like the in-game chat (docs/hosting.md)
 [discord]
@@ -157,6 +158,9 @@ pub struct Config {
     /// The game reads this section itself (docs/chat-filter.md); written only when it isn't the default.
     #[serde(default, skip_serializing_if = "chat_filter_default")]
     pub chat_filter: horizon_chat_filter::Config,
+    /// A one-time prune of barely visited chunks before a start (prune.rs); written only when set.
+    #[serde(default, skip_serializing_if = "crate::prune::Settings::is_default")]
+    pub prune_chunks: crate::prune::Settings,
 }
 
 /// The game reads this section itself too (docs/chat-filter.md).
@@ -310,6 +314,7 @@ pub struct Transfer {
     pub max_expect_seconds: u32,
     pub max_expected: u32,
     pub max_freeze_seconds: u32,
+    pub max_hold_seconds: u32,
 }
 
 impl Default for Transfer {
@@ -320,6 +325,7 @@ impl Default for Transfer {
             max_expect_seconds: 60,
             max_expected: 64,
             max_freeze_seconds: 30,
+            max_hold_seconds: 60,
         }
     }
 }
@@ -331,6 +337,7 @@ impl Transfer {
             ("max_expect_seconds", self.max_expect_seconds),
             ("max_expected", self.max_expected),
             ("max_freeze_seconds", self.max_freeze_seconds),
+            ("max_hold_seconds", self.max_hold_seconds),
         ] {
             if n == 0 {
                 return Err(format!("transfer.{name} must be above zero"));
@@ -346,11 +353,12 @@ impl Transfer {
     pub fn engine_arg(&self) -> Option<String> {
         self.enabled.then(|| {
             format!(
-                "expect_seconds={},max_expect_seconds={},max_expected={},max_freeze_seconds={}",
+                "expect_seconds={},max_expect_seconds={},max_expected={},max_freeze_seconds={},max_hold_seconds={}",
                 self.expect_seconds,
                 self.max_expect_seconds,
                 self.max_expected,
-                self.max_freeze_seconds
+                self.max_freeze_seconds,
+                self.max_hold_seconds
             )
         })
     }
@@ -481,6 +489,7 @@ impl Config {
         self.discord.check()?;
         self.anticheat.check()?;
         self.chat_filter.check()?;
+        self.prune_chunks.check()?;
         if self.server.port == 0 {
             return Err("server.port must be a port number from 1 to 65535".into());
         }
@@ -594,11 +603,12 @@ pub fn render(config: &Config) -> String {
         ("transfer", "max_expect_seconds"),
         ("transfer", "max_expected"),
         ("transfer", "max_freeze_seconds"),
+        ("transfer", "max_hold_seconds"),
     ] {
         set(&mut doc, section, field, &table[section][field]);
     }
     let mut text = doc.to_string();
-    for section in ["anticheat", "chat_filter"] {
+    for section in ["anticheat", "chat_filter", "prune_chunks"] {
         if let Some(settings) = table.get(section) {
             let mut only = toml::Table::new();
             only.insert(section.into(), settings.clone());
@@ -754,7 +764,9 @@ mod tests {
         let config = Config::parse(&on).unwrap();
         assert_eq!(
             config.transfer.engine_arg().as_deref(),
-            Some("expect_seconds=10,max_expect_seconds=60,max_expected=64,max_freeze_seconds=30")
+            Some(
+                "expect_seconds=10,max_expect_seconds=60,max_expected=64,max_freeze_seconds=30,max_hold_seconds=60"
+            )
         );
         assert_eq!(Config::parse(&render(&config)).unwrap(), config);
         for (from, to) in [
