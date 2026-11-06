@@ -369,7 +369,7 @@ impl TopBarUi {
         // Check dropdown items first if dropdown is currently open
         if let Some(menu) = self.open_menu {
             let (menu_x, count) = match menu {
-                TopBarMenu::File => (80.0, 5),
+                TopBarMenu::File => (80.0, 4),
                 TopBarMenu::Camera => (120.0, 6),
                 TopBarMenu::View => (176.0, 4),
             };
@@ -490,40 +490,33 @@ mod tests {
     }
 
     #[test]
-    fn test_topbar_shortcuts_labels() {
-        let _topbar = TopBarUi::new();
-        let (file_x, file_items) = match TopBarMenu::File {
-            TopBarMenu::File => (
-                80.0,
-                vec![
-                    ("📁 Open Recordings Folder", ""),
-                    ("⏸ Game Pause Menu", "P"),
-                    ("✕ Close Replay", "Esc"),
-                ],
-            ),
-            _ => unreachable!(),
-        };
-        assert_eq!(file_x, 80.0);
-        assert_eq!(file_items[0].1, "Ctrl+E");
-        assert_eq!(file_items[2].1, "P");
-        assert_eq!(file_items[3].1, "Esc");
+    fn file_menu_clicks_match_the_four_rendered_actions() {
+        let mut topbar = TopBarUi::new();
+        let actions = [
+            TopBarAction::OpenRecordingsFolder,
+            TopBarAction::OpenStudioSettings,
+            TopBarAction::OpenPauseMenu,
+            TopBarAction::ExitStudio,
+        ];
 
-        let (view_x, view_items) = match TopBarMenu::View {
-            TopBarMenu::View => (
-                176.0,
-                vec![
-                    ("📐 Framing Guides", "G"),
-                    ("⬛ Aspect Ratio Matte", "Shift+A"),
-                    ("🎛 Visuals Sidebar", "V"),
-                    ("⏱ Timeline HUD", "T"),
-                ],
+        for (index, expected_action) in actions.into_iter().enumerate() {
+            topbar.open_menu = Some(TopBarMenu::File);
+            let y = topbar.height + 3.0 + index as f32 * 22.0 + 11.0;
+            assert_eq!(
+                topbar.handle_mouse_click((90.0, y), 1280.0, 720.0),
+                expected_action
+            );
+        }
+
+        // The old fifth hit row had no rendered item or action.
+        topbar.open_menu = Some(TopBarMenu::File);
+        assert_eq!(
+            topbar.handle_mouse_click(
+                (90.0, topbar.height + 3.0 + 4.0 * 22.0 + 11.0),
+                1280.0,
+                720.0
             ),
-            _ => unreachable!(),
-        };
-        assert_eq!(view_x, 176.0);
-        assert_eq!(view_items[0].1, "G");
-        assert_eq!(view_items[1].1, "Shift+A");
-        assert_eq!(view_items[2].1, "V");
-        assert_eq!(view_items[3].1, "T");
+            TopBarAction::None
+        );
     }
 }
