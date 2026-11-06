@@ -96,7 +96,6 @@ actions! {
     DebugNetworkCharts, "key.debug.networkCharts", None;
     DebugLightmapTexture, "key.debug.lightmapTexture", None;
     DebugImprovedTransparency, "key.debug.improvedTransparency", None;
-    StudioExport, "key.studio.export", Some(KeyCode::KeyE);
     StudioPauseMenu, "key.studio.pauseMenu", Some(KeyCode::KeyP);
     StudioToggleFreecam, "key.studio.toggleFreecam", Some(KeyCode::KeyF);
     StudioResetCamera, "key.studio.resetCamera", Some(KeyCode::Home);
