@@ -59,6 +59,8 @@ pub struct VisualsSettings {
     // World section
     pub world_players: bool,
     pub world_particles: bool,
+    pub override_fov: bool,
+    pub fov_value: f32,
 
     // Other / Guides section
     pub guide_rule_of_thirds: bool,
@@ -72,6 +74,8 @@ impl Default for VisualsSettings {
         Self {
             world_players: true,
             world_particles: true,
+            override_fov: false,
+            fov_value: 70.0,
 
             guide_rule_of_thirds: false,
             guide_center: false,
@@ -256,6 +260,23 @@ impl VisualsUi {
             "horizon.studio.visuals.players",
             self.settings.world_players,
         );
+
+        self.render_section_header(
+            batch,
+            atlas,
+            panel_x,
+            &mut y,
+            "horizon.studio.visuals.section.overrides",
+        );
+        self.render_toggle_row(
+            batch,
+            atlas,
+            panel_x,
+            &mut y,
+            right,
+            "horizon.studio.visuals.fov",
+            self.settings.override_fov,
+        );
         // Group 4: Guides & Other
         self.render_section_header(
             batch,
@@ -408,6 +429,10 @@ impl VisualsUi {
         if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.world_players) {
             return true;
         }
+        y += 18.0;
+        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.override_fov) {
+            return true;
+        }
         // Guides & other working editor options.
         y += 18.0;
         if Self::check_toggle_click(
@@ -460,6 +485,7 @@ mod tests {
     fn test_visuals_settings_defaults() {
         let v = VisualsSettings::default();
         assert!(v.world_particles);
+        assert!(!v.override_fov);
         assert!(v.camera_path_3d);
         assert_eq!(v.aspect_ratio, AspectRatio::None);
     }
