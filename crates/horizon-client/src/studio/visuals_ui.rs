@@ -56,32 +56,9 @@ impl AspectRatio {
 /// Settings and toggles stored in the visuals sidebar.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VisualsSettings {
-    // GUI section
-    pub gui_chat: bool,
-    pub gui_boss_bar: bool,
-    pub gui_title_text: bool,
-    pub gui_scoreboard: bool,
-    pub gui_action_bar: bool,
-
     // World section
-    pub world_blocks: bool,
-    pub world_entities: bool,
     pub world_players: bool,
     pub world_particles: bool,
-    pub world_sky: bool,
-    pub world_nametags: bool,
-
-    // Overrides section
-    pub override_fog: bool,
-    pub fog_distance: f32, // 0..100
-    pub override_fov: bool,
-    pub fov_value: f32, // 30..130
-    pub override_time: bool,
-    pub time_of_day: f32, // 0..24000
-    pub override_shake: bool,
-    pub shake_intensity: f32, // 0.0..1.0
-    pub override_roll: bool,
-    pub camera_roll: f32, // -180.0..180.0
 
     // Other / Guides section
     pub guide_rule_of_thirds: bool,
@@ -93,29 +70,8 @@ pub struct VisualsSettings {
 impl Default for VisualsSettings {
     fn default() -> Self {
         Self {
-            gui_chat: true,
-            gui_boss_bar: true,
-            gui_title_text: true,
-            gui_scoreboard: true,
-            gui_action_bar: true,
-
-            world_blocks: true,
-            world_entities: true,
             world_players: true,
             world_particles: true,
-            world_sky: true,
-            world_nametags: true,
-
-            override_fog: false,
-            fog_distance: 64.0,
-            override_fov: false,
-            fov_value: 70.0,
-            override_time: false,
-            time_of_day: 6000.0, // Noon
-            override_shake: false,
-            shake_intensity: 0.0,
-            override_roll: false,
-            camera_roll: 0.0,
 
             guide_rule_of_thirds: false,
             guide_center: false,
@@ -274,43 +230,7 @@ impl VisualsUi {
         let mut y = head_h + 6.0;
         let right = panel_x + self.width - 8.0;
 
-        // Group 1: GUI
-        self.render_section_header(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            "horizon.studio.visuals.section.gui",
-        );
-        self.render_toggle_row(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            right,
-            "horizon.studio.visuals.chat",
-            self.settings.gui_chat,
-        );
-        self.render_toggle_row(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            right,
-            "horizon.studio.visuals.boss_bar",
-            self.settings.gui_boss_bar,
-        );
-        self.render_toggle_row(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            right,
-            "horizon.studio.visuals.scoreboard",
-            self.settings.gui_scoreboard,
-        );
-
-        // Group 2: World
+        // World controls with active rendering behavior.
         self.render_section_header(
             batch,
             atlas,
@@ -324,17 +244,8 @@ impl VisualsUi {
             panel_x,
             &mut y,
             right,
-            "horizon.studio.visuals.render_blocks",
-            self.settings.world_blocks,
-        );
-        self.render_toggle_row(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            right,
-            "horizon.studio.visuals.entities",
-            self.settings.world_entities,
+            "horizon.studio.visuals.particles",
+            self.settings.world_particles,
         );
         self.render_toggle_row(
             batch,
@@ -345,70 +256,6 @@ impl VisualsUi {
             "horizon.studio.visuals.players",
             self.settings.world_players,
         );
-        self.render_toggle_row(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            right,
-            "horizon.studio.visuals.sky",
-            self.settings.world_sky,
-        );
-        self.render_toggle_row(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            right,
-            "horizon.studio.visuals.nametags",
-            self.settings.world_nametags,
-        );
-
-        // Group 3: Overrides
-        self.render_section_header(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            "horizon.studio.visuals.section.overrides",
-        );
-        self.render_toggle_row(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            right,
-            "horizon.studio.visuals.fog",
-            self.settings.override_fog,
-        );
-        self.render_toggle_row(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            right,
-            "horizon.studio.visuals.fov",
-            self.settings.override_fov,
-        );
-        self.render_toggle_row(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            right,
-            "horizon.studio.visuals.time_of_day",
-            self.settings.override_time,
-        );
-        self.render_toggle_row(
-            batch,
-            atlas,
-            panel_x,
-            &mut y,
-            right,
-            "horizon.studio.visuals.shake",
-            self.settings.override_shake,
-        );
-
         // Group 4: Guides & Other
         self.render_section_header(
             batch,
@@ -553,52 +400,15 @@ impl VisualsUi {
         let right = panel_x + self.width - 8.0;
         let mut y = 22.0 + 6.0;
 
-        // Group 1: GUI
+        // World controls: particles then player models.
         y += 18.0;
-        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.gui_chat) {
-            return true;
-        }
-        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.gui_boss_bar) {
-            return true;
-        }
-        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.gui_scoreboard) {
-            return true;
-        }
-
-        // Group 2: World
-        y += 18.0;
-        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.world_blocks) {
-            return true;
-        }
-        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.world_entities) {
+        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.world_particles) {
             return true;
         }
         if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.world_players) {
             return true;
         }
-        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.world_sky) {
-            return true;
-        }
-        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.world_nametags) {
-            return true;
-        }
-
-        // Group 3: Overrides
-        y += 18.0;
-        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.override_fog) {
-            return true;
-        }
-        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.override_fov) {
-            return true;
-        }
-        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.override_time) {
-            return true;
-        }
-        if Self::check_toggle_click(cursor, right, &mut y, &mut self.settings.override_shake) {
-            return true;
-        }
-
-        // Group 4: Guides & Other
+        // Guides & other working editor options.
         y += 18.0;
         if Self::check_toggle_click(
             cursor,
@@ -649,9 +459,7 @@ mod tests {
     #[test]
     fn test_visuals_settings_defaults() {
         let v = VisualsSettings::default();
-        assert!(v.gui_chat);
-        assert!(v.world_blocks);
-        assert!(!v.override_fog);
+        assert!(v.world_particles);
         assert!(v.camera_path_3d);
         assert_eq!(v.aspect_ratio, AspectRatio::None);
     }

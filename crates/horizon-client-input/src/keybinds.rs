@@ -75,7 +75,6 @@ pub const MAPPINGS: &[(&str, &str, &str)] = &[
     ("key.debug.networkCharts", "key.keyboard.3", "debug"),
     ("key.debug.lightmapTexture", "key.keyboard.4", "debug"),
     ("key.debug.improvedTransparency", "key.keyboard.x", "debug"),
-    ("key.studio.export", "key.keyboard.e", "studio"),
     ("key.studio.pauseMenu", "key.keyboard.p", "studio"),
     ("key.studio.toggleFreecam", "key.keyboard.f", "studio"),
     ("key.studio.resetCamera", "key.keyboard.home", "studio"),

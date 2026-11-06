@@ -2,10 +2,9 @@
 //!
 //! Provides native session packet recording (`.mcpr` format), replay simulation,
 //! 6-DOF spectator freecam flight, 3D camera spline keyframing, timeline sequencer HUD,
-//! visuals & overrides inspector, and offline cinematic video export.
+//! visuals & overrides inspector, and timeline camera-path editing.
 
 pub mod camera;
-pub mod export_ui;
 pub mod mcpr;
 pub mod path_render;
 pub mod recorder;
@@ -16,7 +15,6 @@ pub mod topbar;
 pub mod visuals_ui;
 
 pub use camera::StudioFreecam;
-pub use export_ui::{ExportResolution, ExportSettings, ExportUi};
 pub use mcpr::{
     McprReader, McprWriter, Metadata, RecoveryReport, TimestampedPacket, recover_crashed_recordings,
 };

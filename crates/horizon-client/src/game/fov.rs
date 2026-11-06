@@ -127,9 +127,6 @@ impl Game<'_> {
     }
     /// `Camera.calculateFov` with `modifyFovBasedOnDeathOrFluid`.
     pub(super) fn fov_degrees(&self, partial: f32, camera: [f64; 3]) -> f32 {
-        if self.studio_visuals.settings.override_fov {
-            return self.studio_visuals.settings.fov_value;
-        }
         if self.studio_freecam.active {
             return self.studio_freecam.fov;
         }

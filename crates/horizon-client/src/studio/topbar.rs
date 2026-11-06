@@ -27,7 +27,6 @@ pub enum TopBarAction {
     OpenStudioSettings,
     OpenPauseMenu,
     ExitStudio,
-    ExportVideo,
     OpenRecordingsFolder,
     ResetCameraToPlayer,
     ToggleLockToPath,
@@ -239,10 +238,6 @@ impl TopBarUi {
             TopBarMenu::File => (
                 80.0,
                 vec![
-                    (
-                        "horizon.studio.topbar.export_video",
-                        shortcut("key.studio.export", Some("horizon.studio.shortcut.control")),
-                    ),
                     ("horizon.studio.topbar.open_recordings", String::new()),
                     ("horizon.studio.settings.open", String::new()),
                     (
@@ -387,11 +382,10 @@ impl TopBarUi {
                 let idx = ((cy - menu_y - 3.0) / item_h).floor() as usize;
                 self.open_menu = None;
                 return match (menu, idx) {
-                    (TopBarMenu::File, 0) => TopBarAction::ExportVideo,
-                    (TopBarMenu::File, 1) => TopBarAction::OpenRecordingsFolder,
-                    (TopBarMenu::File, 2) => TopBarAction::OpenStudioSettings,
-                    (TopBarMenu::File, 3) => TopBarAction::OpenPauseMenu,
-                    (TopBarMenu::File, 4) => TopBarAction::ExitStudio,
+                    (TopBarMenu::File, 0) => TopBarAction::OpenRecordingsFolder,
+                    (TopBarMenu::File, 1) => TopBarAction::OpenStudioSettings,
+                    (TopBarMenu::File, 2) => TopBarAction::OpenPauseMenu,
+                    (TopBarMenu::File, 3) => TopBarAction::ExitStudio,
 
                     (TopBarMenu::Camera, 0) => TopBarAction::ToggleFreecam,
                     (TopBarMenu::Camera, 1) => TopBarAction::ResetCameraToPlayer,
@@ -502,7 +496,6 @@ mod tests {
             TopBarMenu::File => (
                 80.0,
                 vec![
-                    ("🎬 Export Video...", "Ctrl+E"),
                     ("📁 Open Recordings Folder", ""),
                     ("⏸ Game Pause Menu", "P"),
                     ("✕ Close Replay", "Esc"),

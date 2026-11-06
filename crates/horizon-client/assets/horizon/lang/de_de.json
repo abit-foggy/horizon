@@ -446,6 +446,7 @@
   "horizon.tempban.list.count": "Es gibt %s befristete Sperre(n):",
   "horizon.tempban.list.entry": "%1$s wurde von %2$s gesperrt, %3$s (bis %4$s)",
   "horizon.studio.replay.open_error": "Replay konnte nicht geöffnet werden: %s",
+  "horizon.studio.camera_track.save_error": "Kamerapfad konnte nicht gespeichert werden: %s",
   "horizon.studio.state.on": "AN",
   "horizon.studio.state.off": "AUS",
   "horizon.studio.shortcut.control": "Strg",

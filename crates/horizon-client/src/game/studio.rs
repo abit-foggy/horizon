@@ -30,7 +30,6 @@ pub const HELP: &[&str] = &[
     "studio keyframe add|remove|list add or modify camera spline keyframes",
     "studio timeline [show|hide]    toggle studio timeline HUD overlay",
     "studio visuals                 toggle visuals & cinematic overrides sidebar",
-    "studio export                  open offline video export dialog",
 ];
 
 impl Game<'_> {
@@ -360,13 +359,9 @@ impl Game<'_> {
                     }
                 )));
             }
-            "export" => {
-                self.studio_export.open = true;
-                self.system_message(Text::literal("Studio: Opened video export dialog"));
-            }
             _ => {
                 self.system_message(Text::literal(
-                    "Unknown studio subcommand. Usage: /studio <record|replay|freecam|keyframe|timeline|visuals|export> ...",
+                    "Unknown studio subcommand. Usage: /studio <record|replay|freecam|keyframe|timeline|visuals> ...",
                 ));
             }
         }
@@ -826,7 +821,6 @@ impl Game<'_> {
         self.studio_topbar.close_dropdown();
         self.studio_timeline.visible = false;
         self.studio_visuals.open = false;
-        self.studio_export.open = false;
         self.studio_rmb_down = false;
         self.capture(false);
         if self.integrated.is_none() && self.lan.is_none() {
@@ -862,7 +856,7 @@ impl Game<'_> {
             horizon_protocol::packets::play::Login {
                 player_id: r.entity_id,
                 hardcore: self.level.hardcore,
-                levels: vec!["minecraft:overworld".into()],
+                levels: vec![r.level.clone()],
                 max_players: 20,
                 chunk_radius: self.settings.render_distance,
                 simulation_distance: self.settings.simulation_distance,
@@ -870,13 +864,16 @@ impl Game<'_> {
                 show_death_screen: true,
                 limited_crafting: false,
                 spawn: horizon_protocol::packets::play::SpawnInfo {
-                    dimension_type: 0,
-                    dimension: "minecraft:overworld".into(),
-                    seed: 0,
-                    game_type: 0,
+                    dimension_type: r
+                        .registries
+                        .id("minecraft:dimension_type", &r.dimension.name)
+                        .unwrap_or(0),
+                    dimension: r.level.clone(),
+                    seed: r.hashed_seed,
+                    game_type: r.game_mode,
                     previous_game_type: None,
                     debug: false,
-                    flat: false,
+                    flat: r.flat,
                     last_death: None,
                     portal_cooldown: 0,
                     sea_level: 63,

@@ -50,7 +50,6 @@ pub enum TimelineAction {
     RemoveCameraKeyframe(usize),
     SelectKeyframe(usize),
     SplitClip(u64),
-    OpenExportDialog,
     ToggleVisualsSidebar,
     None,
 }
@@ -357,20 +356,8 @@ impl TimelineUi {
             (split_hover, true, false),
         );
 
-        // Right side: Visuals toggle & Export button
-        let export_w = 64.0;
-        let export_x = w - export_w - 6.0;
-        let export_hover = ui::hovered(cursor, export_x, y, export_w, btn_h);
-        style::button(
-            batch,
-            atlas,
-            [export_x, y, export_w, btn_h],
-            &Text::translate("horizon.studio.timeline.export", &[]),
-            (export_hover, true, true), // Primary violet accent button
-        );
-
         let visuals_w = 60.0;
-        let visuals_x = export_x - visuals_w - 4.0;
+        let visuals_x = w - visuals_w - 6.0;
         let visuals_hover = ui::hovered(cursor, visuals_x, y, visuals_w, btn_h);
         style::button(
             batch,
@@ -688,16 +675,9 @@ impl TimelineUi {
             return TimelineAction::SplitClip(self.current_time_ms);
         }
 
-        // Export button
-        let export_w = 64.0;
-        let export_x = screen_w - export_w - 6.0;
-        if ui::hovered(cursor, export_x, y, export_w, btn_h) {
-            return TimelineAction::OpenExportDialog;
-        }
-
         // Visuals button
         let visuals_w = 60.0;
-        let visuals_x = export_x - visuals_w - 4.0;
+        let visuals_x = screen_w - visuals_w - 6.0;
         if ui::hovered(cursor, visuals_x, y, visuals_w, btn_h) {
             return TimelineAction::ToggleVisualsSidebar;
         }

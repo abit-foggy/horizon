@@ -6,6 +6,7 @@
 //!   `[timestamp_ms: u32 big-endian][packet_length: u32 big-endian][packet_data: VarInt(packet_id) + payload]`
 //! - Optional `markers.json`: timeline markers/chapters.
 
+use super::spline::CameraTrack;
 use horizon_protocol::buf::{Reader, write_varint};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -372,6 +373,53 @@ impl McprWriter {
         result
     }
 
+    /// Save or replace the editor's camera path without rewriting the packet stream.
+    pub fn replace_camera_track(path: &Path, track: &CameraTrack) -> io::Result<()> {
+        let part = sibling(path, "camera.part");
+        let result = (|| {
+            let file = File::open(path)?;
+            let mut archive = zip::ZipArchive::new(file)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let mut output = zip::ZipWriter::new(create_private_file(&part)?);
+            for index in 0..archive.len() {
+                let mut entry = archive.by_index(index).map_err(io::Error::other)?;
+                let name = entry.name().map_err(io::Error::other)?.into_owned();
+                if name == "camera.json" {
+                    continue;
+                }
+                let options = zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated)
+                    .large_file(entry.size() >= u32::MAX as u64);
+                if entry.is_dir() {
+                    output
+                        .add_directory(name, options)
+                        .map_err(io::Error::other)?;
+                } else {
+                    output.start_file(name, options).map_err(io::Error::other)?;
+                    io::copy(&mut entry, &mut output)?;
+                }
+            }
+            if !track.is_empty() {
+                output
+                    .start_file(
+                        "camera.json",
+                        zip::write::SimpleFileOptions::default()
+                            .compression_method(zip::CompressionMethod::Deflated),
+                    )
+                    .map_err(io::Error::other)?;
+                serde_json::to_writer_pretty(&mut output, track).map_err(io::Error::other)?;
+            }
+            let file = output.finish().map_err(io::Error::other)?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&part, path)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&part);
+        }
+        result
+    }
+
     /// The stream file holding the packets until `finish` succeeds.
     pub fn stream_path(&self) -> &Path {
         &self.temp_tmcpr_path
@@ -680,6 +728,7 @@ pub struct McprReader {
     total_packets: usize,
     /// Optional editor and compatibility entries.
     pub markers: Vec<Marker>,
+    pub camera_track: Option<CameraTrack>,
     pub mods_json: Option<Vec<u8>>,
     pub resource_pack_present: bool,
 }
@@ -801,6 +850,8 @@ impl McprReader {
         let markers =
             read_optional_json::<Vec<Marker>>(&mut archive, "markers.json", MAX_METADATA_BYTES)?
                 .unwrap_or_default();
+        let camera_track =
+            read_optional_json::<CameraTrack>(&mut archive, "camera.json", MAX_METADATA_BYTES)?;
         let mods_json = read_optional_entry(&mut archive, "mods.json", MAX_METADATA_BYTES)?;
         // Bound embedded resource packs to avoid unbounded archive expansion.
         let resource_pack_present = match archive.by_name("resourcepack/resources.zip") {
@@ -847,6 +898,7 @@ impl McprReader {
             packet_index,
             total_packets,
             markers,
+            camera_track,
             mods_json,
             resource_pack_present,
         })
@@ -1185,7 +1237,7 @@ mod tests {
         let finished_path = writer.finish(550).unwrap();
         assert_eq!(finished_path, mcpr_path);
 
-        let mut reader = McprReader::open(&mcpr_path).unwrap();
+        let reader = McprReader::open(&mcpr_path).unwrap();
         assert_eq!(reader.metadata.server_name, "Studio Test Server");
         assert_eq!(reader.metadata.duration, 550);
         assert_eq!(reader.metadata.players, vec!["Player1", "Player2"]);
@@ -1202,6 +1254,19 @@ mod tests {
             Some(br#"{"requiredMods":[]}"#.as_slice())
         );
         assert!(reader.resource_pack_present);
+        drop(reader);
+        let track = CameraTrack {
+            keyframes: vec![super::super::spline::CameraKeyframe::new(
+                125,
+                [1.0, 2.0, 3.0],
+                45.0,
+                -10.0,
+                70.0,
+            )],
+        };
+        McprWriter::replace_camera_track(&mcpr_path, &track).unwrap();
+        let mut reader = McprReader::open(&mcpr_path).unwrap();
+        assert_eq!(reader.camera_track, Some(track));
 
         let p0 = reader.next_packet().unwrap().unwrap();
         assert_eq!(p0.timestamp_ms, 0);

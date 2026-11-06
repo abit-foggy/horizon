@@ -4,6 +4,7 @@
 //! loop at user-controlled playback speeds (slow-motion, 1x, fast-forward, pause).
 
 use super::mcpr::{Marker, McprReader, McprWriter, Metadata, TimestampedPacket};
+use super::spline::CameraTrack;
 use std::{
     io,
     path::{Path, PathBuf},
@@ -65,6 +66,16 @@ impl ReplayDriver {
 
     pub fn markers(&self) -> &[Marker] {
         &self.reader.markers
+    }
+
+    pub fn camera_track(&self) -> Option<&CameraTrack> {
+        self.reader.camera_track.as_ref()
+    }
+
+    pub fn save_camera_track(&mut self, track: &CameraTrack) -> io::Result<()> {
+        McprWriter::replace_camera_track(&self.path, track)?;
+        self.reader.camera_track = (!track.is_empty()).then(|| track.clone());
+        Ok(())
     }
 
     /// Add a bookmark at the replay playhead and persist it in markers.json.

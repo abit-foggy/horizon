@@ -3120,8 +3120,6 @@ struct Game<'a> {
     pub(super) studio_timeline: horizon_client::studio::TimelineUi,
     /// Studio visuals and cinematic overrides sidebar.
     pub(super) studio_visuals: horizon_client::studio::VisualsUi,
-    /// Studio video export dialog.
-    pub(super) studio_export: horizon_client::studio::ExportUi,
     /// Studio macOS-style top menu bar.
     pub(super) studio_topbar: horizon_client::studio::TopBarUi,
     /// Replay file path currently opened.
@@ -9244,10 +9242,6 @@ impl Game<'_> {
             self.studio_visuals
                 .render(&mut batch, &self.gui.atlas, self.cursor, bottom_offset);
 
-            // 4. Export Dialog modal
-            self.studio_export
-                .render(&mut batch, &self.gui.atlas, self.cursor);
-
             // 5. macOS-Style Top Menu Bar
             let rec_name = self
                 .studio_replay_path
@@ -11848,7 +11842,11 @@ impl Game<'_> {
         self.mark_stage(out.len(), "PARTICLES");
         let world = &self.world;
         let particle_mode = self.settings.horizon.particle_culling;
-        if particle_mode == horizon_client::graphics::ParticleCullingMode::Off {
+        let show_world_particles = !(self.studio_freecam.active || self.studio_replay.is_some())
+            || self.studio_visuals.settings.world_particles;
+        if show_world_particles
+            && particle_mode == horizon_client::graphics::ParticleCullingMode::Off
+        {
             self.particles.render(
                 camera,
                 self.yaw,
@@ -11857,7 +11855,7 @@ impl Game<'_> {
                 &|b| world.light(b[0], b[1], b[2]),
                 &mut out,
             );
-        } else {
+        } else if show_world_particles {
             let frustum = self.view_frustum;
             let pixel_focal_length = self.renderer.as_ref().map_or(0.0, |renderer| {
                 let tangent = (f64::from(fov_degrees).to_radians() * 0.5).tan();
@@ -16998,10 +16996,6 @@ impl Game<'_> {
                             self.studio_topbar.close_dropdown();
                             return Ok(());
                         }
-                        if self.studio_export.open {
-                            self.studio_export.open = false;
-                            return Ok(());
-                        }
                         self.close_studio_replay()?;
                         return Ok(());
                     }
@@ -18863,10 +18857,6 @@ impl Game<'_> {
                                 self.close_studio_replay()?;
                                 return Ok(());
                             }
-                            horizon_client::studio::TopBarAction::ExportVideo => {
-                                self.studio_export.open = true;
-                                return Ok(());
-                            }
                             horizon_client::studio::TopBarAction::OpenRecordingsFolder => {
                                 let dir = std::path::PathBuf::from("recordings");
                                 let _ = std::fs::create_dir_all(&dir);
@@ -18983,15 +18973,6 @@ impl Game<'_> {
                             horizon_client::studio::TopBarAction::None => {}
                         }
                         if self.cursor.1 <= self.studio_topbar.height || had_open_menu {
-                            return Ok(());
-                        }
-
-                        // 1. Export Dialog modal check
-                        if self.studio_export.open
-                            && self
-                                .studio_export
-                                .handle_mouse_click(self.cursor, b.width, b.height)
-                        {
                             return Ok(());
                         }
 
@@ -19132,10 +19113,6 @@ impl Game<'_> {
                                 }
                                 horizon_client::studio::TimelineAction::SelectKeyframe(idx) => {
                                     self.studio_timeline.selected_keyframe = Some(idx);
-                                    return Ok(());
-                                }
-                                horizon_client::studio::TimelineAction::OpenExportDialog => {
-                                    self.studio_export.open = true;
                                     return Ok(());
                                 }
                                 horizon_client::studio::TimelineAction::SplitClip(time_ms) => {
@@ -19628,8 +19605,6 @@ impl Game<'_> {
                             self.capture(false);
                         } else if self.studio_topbar.open_menu.is_some() {
                             self.studio_topbar.close_dropdown();
-                        } else if self.studio_export.open {
-                            self.studio_export.open = false;
                         } else {
                             self.close_studio_replay()?;
                         }
@@ -19664,15 +19639,7 @@ impl Game<'_> {
                         && event.state == ElementState::Pressed
                         && !event.repeat
                     {
-                        // 1. Ctrl+E: Export Video
-                        if (self.modifiers.control_key() || self.modifiers.super_key())
-                            && self.studio_key_pressed(key, "key.studio.export")
-                        {
-                            self.studio_export.open = true;
-                            return Ok(());
-                        }
-
-                        // 2. P: Pause Menu
+                        // P: Pause Menu
                         if self.studio_key_pressed(key, "key.studio.pauseMenu") {
                             self.pause_menu = true;
                             self.capture(false);
@@ -20698,7 +20665,6 @@ impl<'a> Game<'a> {
             studio_freecam: Default::default(),
             studio_timeline: Default::default(),
             studio_visuals: Default::default(),
-            studio_export: Default::default(),
             studio_topbar: Default::default(),
             studio_replay_path: None,
             studio_rmb_down: false,

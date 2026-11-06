@@ -910,6 +910,7 @@
   "This button also does: %s": "This button also does: %s",
   "horizon.pad.notice.connected.press": "Press to use it",
   "horizon.studio.replay.open_error": "Could not open replay: %s",
+  "horizon.studio.camera_track.save_error": "Could not save camera path: %s",
   "horizon.studio.state.on": "ON",
   "horizon.studio.state.off": "OFF",
   "horizon.studio.shortcut.control": "Ctrl",
