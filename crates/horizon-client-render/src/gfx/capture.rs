@@ -509,6 +509,7 @@ impl Scene {
             underwater: f.underwater,
             water_plane: f.water_plane,
             cave_culling: f.cave_culling,
+            terrain_visible: true,
             title: false,
             sky_blocked: f.sky_blocked,
             skybox: f.skybox,

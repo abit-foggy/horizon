@@ -162,6 +162,9 @@ impl Game<'_> {
     }
     /// The other players' models and names: the players a server sends.
     fn other_players(&self) -> Vec<(&Mob, String)> {
+        if self.studio_replay.is_some() && !self.studio_visuals.settings.world_players {
+            return Vec::new();
+        }
         let mut out = Vec::new();
         let indices = first_mob_indices(&self.mobs);
         for (id, name) in self.remote_player_names() {
@@ -175,7 +178,8 @@ impl Game<'_> {
     /// name, while that model shows in third person. Vanilla never names the
     /// camera entity (`LivingEntityRenderer.shouldShowName`).
     fn own_name_tag(&self) -> Option<(&Mob, String)> {
-        if !self.settings.extras.own_name_tag
+        if (self.studio_replay.is_some() && !self.studio_visuals.settings.world_players)
+            || !self.settings.extras.own_name_tag
             || self.camera_type.first_person()
             || self.sleeping.is_some()
             || self.spectator()

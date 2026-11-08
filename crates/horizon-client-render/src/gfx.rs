@@ -941,6 +941,8 @@ pub struct Frame<'a> {
     /// Skip sections the camera cannot see through open faces (vanilla's
     /// occlusion graph; off in spectator-like views inside blocks).
     pub cave_culling: bool,
+    /// Whether chunk terrain and its shadows are drawn (Studio replay visibility option).
+    pub terrain_visible: bool,
     /// Title screen: only the dedicated panorama cube map and the HUD.
     pub title: bool,
     /// Lava, powder snow, blindness, darkness or a boss bar's world fog leaves out the sky pass
@@ -8314,7 +8316,7 @@ impl Renderer {
         // (above the screen's top, the far shore, the trees against the sky).
         let mirror_plane = frame
             .water_plane
-            .filter(|_| !frame.title && self.wants_water_plane());
+            .filter(|_| !frame.title && frame.terrain_visible && self.wants_water_plane());
         let mirror = mirror_plane.map(|plane| Frustum {
             planes: frustum(mirror_view_projection(
                 cull_proj,
@@ -8341,15 +8343,19 @@ impl Renderer {
             .pack_post
             .as_ref()
             .and_then(|p| p.1.as_ref())
-            .filter(|_| !frame.title)
+            .filter(|_| !frame.title && frame.terrain_visible)
             .and_then(|p| p.shadow_view(frame))
             .or_else(|| {
                 // One of Horizon's own packs with `[shadow]` uses the same lists.
-                let native = self.native.as_ref().filter(|_| !frame.title)?;
+                let native = self
+                    .native
+                    .as_ref()
+                    .filter(|_| !frame.title && frame.terrain_visible)?;
                 native.shadow.as_ref()?;
                 native.frame.shadow_view(frame)
             });
         let pack_terrain = !frame.title
+            && frame.terrain_visible
             && self
                 .pack_post
                 .as_ref()
@@ -8385,6 +8391,7 @@ impl Renderer {
             .is_some_and(|n| n.displacement.is_some());
         let mut gpu_frame = self.gpu_culling.is_some()
             && !frame.title
+            && frame.terrain_visible
             && !pack_terrain
             && shadow_view.is_none()
             && mirror_plane.is_none()
@@ -8476,7 +8483,7 @@ impl Renderer {
         let now = std::time::Instant::now();
         let mut visible_lods = std::mem::take(&mut self.visible_lods);
         visible_lods.clear();
-        if frame.title {
+        if frame.title || !frame.terrain_visible {
             visible.clear();
         } else {
             visible_lods.extend(
@@ -8488,7 +8495,9 @@ impl Renderer {
         }
         let mut shadow_visible = std::mem::take(&mut self.shadow_visible);
         shadow_visible.clear();
-        if let Some(v) = &shadow_view {
+        if frame.terrain_visible
+            && let Some(v) = &shadow_view
+        {
             let radius = (frame.detail_distance / 16.0) as i32;
             let light = ShadowCull {
                 light: shadow_box(v),
@@ -8531,6 +8540,7 @@ impl Renderer {
         }
         // A `shaders/` pack that draws the terrain, or its shadow, sees it as Iris does.
         let shaders_pack = !frame.title
+            && frame.terrain_visible
             && self
                 .pack_post
                 .as_ref()

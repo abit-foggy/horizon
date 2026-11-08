@@ -642,6 +642,9 @@ impl Game<'_> {
             TopBarAction::ToggleTimeline => {
                 self.studio_timeline.visible = !self.studio_timeline.visible;
             }
+            TopBarAction::ToggleVisuals => {
+                self.studio_visuals.open = !self.studio_visuals.open;
+            }
             TopBarAction::SplitClip => {
                 self.studio_timeline
                     .split_at(self.studio_timeline.current_time_ms);

@@ -7607,6 +7607,12 @@ impl Game<'_> {
                 continue;
             }
             let is_player = &*mob.kind.id == "minecraft:player";
+            if is_player
+                && self.studio_replay.is_some()
+                && !self.studio_visuals.settings.world_players
+            {
+                continue;
+            }
             let d = glam::DVec3::new(mob.position.x, mob.position.y, mob.position.z) - camera;
             // Entity.shouldRenderAtSqrDistance: 64 times the bounding box's
             // mean edge, scaled by the view scale. RemotePlayer's box counts

@@ -3126,6 +3126,7 @@ struct Game<'a> {
     pub(super) studio_freecam: horizon_client::studio::StudioFreecam,
     pub(super) studio_timeline: horizon_client::studio::TimelineUi,
     pub(super) studio_topbar: horizon_client::studio::TopBarUi,
+    pub(super) studio_visuals: horizon_client::studio::VisualsUi,
     pub(super) studio_rmb_down: bool,
     studio_camera_track_dirty: bool,
     /// Camera perspective to restore after leaving replay playback.
@@ -8327,6 +8328,25 @@ impl Game<'_> {
                 self.cursor,
                 &self.studio_freecam,
             );
+            self.studio_visuals.render(
+                &mut batch,
+                &self.gui.atlas,
+                self.cursor,
+                if self.studio_timeline.visible {
+                    self.studio_timeline.height()
+                } else {
+                    0.0
+                },
+            );
+            self.studio_visuals.render_guides(
+                &mut batch,
+                &self.gui.atlas,
+                if self.studio_timeline.visible {
+                    self.studio_timeline.height()
+                } else {
+                    0.0
+                },
+            );
         }
         if show_hud {
             self.draw_pad_guide(&mut batch, guide_from);
@@ -9785,22 +9805,24 @@ impl Game<'_> {
         self.mob_geometry(camera, alpha, &mut out);
         self.mark_motion(out.len(), 0);
         laps.lap("eg_mobs");
-        // In first person only a shader pack's shadow pass draws the player.
-        self.mark_player(out.len(), !self.own_body_in_view());
-        let player_start = out.len();
-        self.mark_motion(player_start, Self::MOTION_OWN_PLAYER);
-        let player_alpha = if self.studio_replay.is_some() {
-            (self.studio_virtual_tick_ms as f64 / 50.0).clamp(0.0, 1.0)
-        } else {
-            self.clock.camera_fraction()
-        };
-        self.player_model_geometry(camera, player_alpha, &mut out);
-        // A native pack has no per-entity draws to hide it with: its shadow pass alone gets
-        // the first-person model.
-        if self.pack_ids.is_none() && !self.own_body_in_view() {
-            self.shadow_only_vertices
-                .borrow_mut()
-                .extend(out.drain(player_start..));
+        if self.studio_replay.is_none() || self.studio_visuals.settings.world_players {
+            // In first person only a shader pack's shadow pass draws the player.
+            self.mark_player(out.len(), !self.own_body_in_view());
+            let player_start = out.len();
+            self.mark_motion(player_start, Self::MOTION_OWN_PLAYER);
+            let player_alpha = if self.studio_replay.is_some() {
+                (self.studio_virtual_tick_ms as f64 / 50.0).clamp(0.0, 1.0)
+            } else {
+                self.clock.camera_fraction()
+            };
+            self.player_model_geometry(camera, player_alpha, &mut out);
+            // A native pack has no per-entity draws to hide it with: its shadow pass alone gets
+            // the first-person model.
+            if self.pack_ids.is_none() && !self.own_body_in_view() {
+                self.shadow_only_vertices
+                    .borrow_mut()
+                    .extend(out.drain(player_start..));
+            }
         }
         self.mark_motion(out.len(), 0);
         // Companions in first person, trails and auras (game/cosmetics/fx.rs).
@@ -10286,42 +10308,50 @@ impl Game<'_> {
         laps.lap("eg_objects");
         // Particles (ParticleEngine.extract): camera-facing quads.
         self.mark_stage(out.len(), "PARTICLES");
-        let world = &self.world;
-        let particle_mode = self.settings.horizon.particle_culling;
-        if particle_mode == horizon_client::graphics::ParticleCullingMode::Off {
-            self.particles.render(
-                camera,
-                self.yaw,
-                self.pitch,
-                alpha as f32,
-                &|b| world.light(b[0], b[1], b[2]),
-                &mut out,
-            );
-        } else {
-            let frustum = self.view_frustum;
-            let pixel_focal_length = self.renderer.as_ref().map_or(0.0, |renderer| {
-                let tangent = (f64::from(fov_degrees).to_radians() * 0.5).tan();
-                if tangent.is_finite() && tangent > 0.0 {
-                    (f64::from(renderer.config.height.max(1)) / (2.0 * tangent)) as f32
-                } else {
-                    0.0
-                }
-            });
-            {
-                let mut particle_culling = self.particle_occlusion_context(camera);
-                self.particles.render_culled(
+        let studio_particles_visible = self
+            .studio_replay
+            .as_ref()
+            .is_none_or(|_| self.studio_visuals.settings.world_particles);
+        if studio_particles_visible {
+            let world = &self.world;
+            let particle_mode = self.settings.horizon.particle_culling;
+            if particle_mode == horizon_client::graphics::ParticleCullingMode::Off {
+                self.particles.render(
                     camera,
                     self.yaw,
                     self.pitch,
                     alpha as f32,
-                    pixel_focal_length,
-                    true,
-                    frustum.as_ref(),
-                    &mut |min, max| particle_culling.hidden(min, max),
                     &|b| world.light(b[0], b[1], b[2]),
                     &mut out,
                 );
+            } else {
+                let frustum = self.view_frustum;
+                let pixel_focal_length = self.renderer.as_ref().map_or(0.0, |renderer| {
+                    let tangent = (f64::from(fov_degrees).to_radians() * 0.5).tan();
+                    if tangent.is_finite() && tangent > 0.0 {
+                        (f64::from(renderer.config.height.max(1)) / (2.0 * tangent)) as f32
+                    } else {
+                        0.0
+                    }
+                });
+                {
+                    let mut particle_culling = self.particle_occlusion_context(camera);
+                    self.particles.render_culled(
+                        camera,
+                        self.yaw,
+                        self.pitch,
+                        alpha as f32,
+                        pixel_focal_length,
+                        true,
+                        frustum.as_ref(),
+                        &mut |min, max| particle_culling.hidden(min, max),
+                        &|b| world.light(b[0], b[1], b[2]),
+                        &mut out,
+                    );
+                }
+                self.finish_async_particle_culling();
             }
+        } else {
             self.finish_async_particle_culling();
         }
         laps.lap("eg_particles");
@@ -14052,7 +14082,9 @@ impl Game<'_> {
         // hitboxes (F3+G, F3+B).
         let mut lines = self.fishing_line(alpha, size);
         let mut g = self.debug_gizmos(alpha as f32, camera.to_array());
-        if self.studio_freecam.active || self.studio_replay.is_some() {
+        if (self.studio_freecam.active || self.studio_replay.is_some())
+            && self.studio_visuals.settings.camera_path
+        {
             horizon_client::studio::render_camera_path(
                 &self.studio_freecam.track,
                 &mut g,
@@ -14386,6 +14418,10 @@ impl Game<'_> {
         let glowing = std::mem::take(self.glowing_vertices.get_mut());
         let shadow_only = std::mem::take(self.shadow_only_vertices.get_mut());
         let skin = std::mem::take(self.skin_frame.get_mut());
+        let studio_entities_visible = self
+            .studio_replay
+            .as_ref()
+            .is_none_or(|_| self.studio_visuals.settings.world_entities);
         let frame = Frame {
             weather: &weather,
             weather_time: horizon_client::weather::Time::new(self.world.game_time, alpha as f32),
@@ -14440,6 +14476,10 @@ impl Game<'_> {
             boss_world_fog: self.boss_overlay.should_create_world_fog(),
             environment_fog: (self.dim == Dim::Nether).then_some((sky.fog_start, sky.fog_end)),
             cave_culling,
+            terrain_visible: self
+                .studio_replay
+                .as_ref()
+                .is_none_or(|_| self.studio_visuals.settings.world_blocks),
             water_fog,
             fog: Some(self.frame_fog(camera, &sky, biome, water_fog)),
             dark_disc: self.dark_disc(camera),
@@ -14468,26 +14508,66 @@ impl Game<'_> {
                 fast: self.settings.clouds == "fast",
                 color: sky.cloud_color,
             }),
-            entities: &entities,
-            static_block_entities: &static_block_entities,
-            visible_static_block_entity_sections: &visible_static_block_entity_sections,
+            entities: if studio_entities_visible {
+                &entities
+            } else {
+                &[]
+            },
+            static_block_entities: if studio_entities_visible {
+                &static_block_entities
+            } else {
+                &[]
+            },
+            visible_static_block_entity_sections: if studio_entities_visible {
+                &visible_static_block_entity_sections
+            } else {
+                &[]
+            },
             static_block_entity_stats,
-            entity_motion: &entity_motion,
-            entity_motion_posed: &entity_motion_posed,
-            entity_spans: &entity_spans,
-            skin: skin.pending().then_some(&skin),
-            glowing: &glowing,
+            entity_motion: if studio_entities_visible {
+                &entity_motion
+            } else {
+                &[]
+            },
+            entity_motion_posed: if studio_entities_visible {
+                &entity_motion_posed
+            } else {
+                &[]
+            },
+            entity_spans: if studio_entities_visible {
+                &entity_spans
+            } else {
+                &[]
+            },
+            skin: (studio_entities_visible && skin.pending()).then_some(&skin),
+            glowing: if studio_entities_visible {
+                &glowing
+            } else {
+                &[]
+            },
             dynamic_lights: &self.dynamic_lights,
             colored_lights: &colored_lights,
             emissive_layers: &emissive_layers,
             lightning: horizon_client::gfx::lightning::Input {
-                bolts: &bolts,
+                bolts: if studio_entities_visible { &bolts } else { &[] },
                 uv: horizon_client::gfx::lightning::white_uv(&self.gui.atlas.font.white()),
             },
-            additive: &additive,
-            see_through: &see_through,
+            additive: if studio_entities_visible {
+                &additive
+            } else {
+                &[]
+            },
+            see_through: if studio_entities_visible {
+                &see_through
+            } else {
+                &[]
+            },
             world_primitives: world_primitives.batch(),
-            shadow_only: &shadow_only,
+            shadow_only: if studio_entities_visible {
+                &shadow_only
+            } else {
+                &[]
+            },
             celestial: if self.settings.horizon.sky || title {
                 &celestial
             } else {
@@ -15867,6 +15947,17 @@ impl Game<'_> {
                         if had_open_menu || self.cursor.1 <= self.studio_topbar.height {
                             return Ok(());
                         }
+                        if self.studio_visuals.handle_mouse_click(
+                            self.cursor,
+                            (batch.width, batch.height),
+                            if self.studio_timeline.visible {
+                                self.studio_timeline.height()
+                            } else {
+                                0.0
+                            },
+                        ) {
+                            return Ok(());
+                        }
                         if self.studio_timeline.visible {
                             let action = self.studio_timeline.handle_mouse_down(
                                 self.cursor,
@@ -17147,6 +17238,7 @@ impl<'a> Game<'a> {
             studio_freecam: Default::default(),
             studio_timeline: Default::default(),
             studio_topbar: Default::default(),
+            studio_visuals: Default::default(),
             studio_rmb_down: false,
             studio_camera_track_dirty: false,
             studio_replay_previous_camera_type: None,

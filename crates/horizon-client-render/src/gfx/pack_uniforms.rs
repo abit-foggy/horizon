@@ -2519,6 +2519,7 @@ pub(super) mod initial_history_tests {
             depth_far: 1000.0,
             underwater: false,
             cave_culling: false,
+            terrain_visible: true,
             title: true,
             sky_blocked: false,
             skybox: false,

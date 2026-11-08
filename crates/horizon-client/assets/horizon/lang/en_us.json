@@ -1045,5 +1045,22 @@
   "horizon.studio.topbar.add_marker": "Add Marker",
   "horizon.studio.topbar.clear_keyframes": "🗑 Clear Keyframes",
   "horizon.studio.topbar.timeline_hud": "⏱ Timeline",
-  "horizon.studio.topbar.split_scene": "Split Scene"
+  "horizon.studio.topbar.split_scene": "Split Scene",
+  "horizon.studio.topbar.visuals": "Visuals",
+  "horizon.studio.visuals.title": "Visuals",
+  "horizon.studio.visuals.blocks": "Blocks",
+  "horizon.studio.visuals.entities": "Entities",
+  "horizon.studio.visuals.players": "Players",
+  "horizon.studio.visuals.particles": "Particles",
+  "horizon.studio.visuals.rule_of_thirds": "Rule of Thirds",
+  "horizon.studio.visuals.center_guide": "Center Guide",
+  "horizon.studio.visuals.camera_path": "Camera Path",
+  "horizon.studio.visuals.fov_override": "FOV Override",
+  "horizon.studio.visuals.fov": "Field of View",
+  "horizon.studio.visuals.aspect": "Aspect Ratio",
+  "horizon.studio.visuals.aspect.none": "Off",
+  "horizon.studio.visuals.aspect.16_9": "16:9",
+  "horizon.studio.visuals.aspect.4_3": "4:3",
+  "horizon.studio.visuals.aspect.1_1": "1:1",
+  "horizon.studio.visuals.aspect.21_9": "21:9"
 }
