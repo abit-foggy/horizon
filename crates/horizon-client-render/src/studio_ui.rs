@@ -548,23 +548,23 @@ pub struct StudioSettingsUi {
 }
 
 impl StudioSettingsUi {
-    const ROW_H: f32 = 54.0;
-    const SECTION_H: f32 = 22.0;
+    const ROW_H: f32 = 46.0;
+    const SECTION_H: f32 = 20.0;
 
     fn geometry(size: (f32, f32)) -> ([f32; 4], [f32; 4], [f32; 4]) {
         let (w, h) = size;
-        let panel_w = (w - 32.0).clamp(280.0, 520.0).min(w.max(1.0));
+        let panel_w = (w - 24.0).clamp(320.0, 560.0).min(w.max(1.0));
         let panel_x = ((w - panel_w) / 2.0).floor();
-        let panel_y = 62.0_f32.min((h - 80.0).max(8.0));
-        let panel_h = (h - panel_y - 42.0).max(96.0);
+        let panel_y = 52.0_f32.min((h - 80.0).max(8.0));
+        let panel_h = (h - panel_y - 36.0).max(120.0);
         let panel = [panel_x, panel_y, panel_w, panel_h];
         let viewport = [
             panel_x + 8.0,
-            panel_y + 34.0,
+            panel_y + 8.0,
             panel_w - 16.0,
-            (panel_h - 70.0).max(0.0),
+            (panel_h - 16.0).max(0.0),
         ];
-        let done = [panel_x + panel_w - 84.0, h - 30.0, 84.0, 20.0];
+        let done = [panel_x + panel_w - 84.0, h - 28.0, 84.0, 20.0];
         (panel, viewport, done)
     }
 
@@ -639,20 +639,23 @@ impl StudioSettingsUi {
             batch,
             atlas,
             &Text::translate("horizon.studio.settings.description", &[]),
-            18.0,
-            34.0,
-            w - 36.0,
+            12.0,
+            24.0,
+            w - 24.0,
+            style::GREY,
+        );
+        ui::centered_text(
+            batch,
+            atlas,
+            &Text::translate("horizon.studio.settings.description_secondary", &[]),
+            12.0,
+            36.0,
+            w - 24.0,
             style::GREY,
         );
 
         let (panel, viewport, done) = Self::geometry((w, h));
         style::panel(batch, atlas, panel);
-        style::fill(
-            batch,
-            atlas,
-            [panel[0], panel[1], panel[2], 24.0],
-            style::OPEN,
-        );
 
         let rows = Self::rows(settings);
         let max_scroll = (Self::content_height() - viewport[3]).max(0.0);
@@ -680,17 +683,34 @@ impl StudioSettingsUi {
                 }
             }
             let rect = [viewport[0], y, viewport[2], Self::ROW_H - 4.0];
-            if rect[1] >= viewport[1] && rect[1] + rect[3] <= viewport[1] + viewport[3] {
+            if rect[1] + rect[3] >= viewport[1] && rect[1] <= viewport[1] + viewport[3] {
                 let hovered = ui::hovered(cursor, rect[0], rect[1], rect[2], rect[3]);
-                let on_off =
-                    Text::translate(if enabled { "options.on" } else { "options.off" }, &[]);
-                let button_label = Text::translate(label, &[on_off]);
-                style::button(batch, atlas, rect, &Text::empty(), (hovered, true, enabled));
+                let bg = if hovered {
+                    0x2AFFFFFF
+                } else {
+                    0x12FFFFFF
+                };
+                let ring_color = if hovered {
+                    style::WHITE
+                } else {
+                    0x22FFFFFF
+                };
+                style::fill(batch, atlas, rect, bg);
+                style::ring(batch, atlas, rect, ring_color);
+
+                let button_label = Text::translate(label, &[]);
+                let toggle_w = 44.0;
+                let toggle_h = 20.0;
+                let toggle_rect = [rect[0] + rect[2] - toggle_w - 8.0, rect[1] + 6.0, toggle_w, toggle_h];
+                let toggle_hover = ui::hovered(cursor, toggle_rect[0], toggle_rect[1], toggle_rect[2], toggle_rect[3]);
+                let on_off = Text::translate(if enabled { "options.on" } else { "options.off" }, &[]);
+                style::button(batch, atlas, toggle_rect, &on_off, (toggle_hover, true, enabled));
+
                 batch.text_styled(
                     atlas,
                     &button_label,
                     rect[0] + 10.0,
-                    rect[1] + 8.0,
+                    rect[1] + 7.0,
                     style::WHITE,
                     true,
                 );
@@ -699,7 +719,7 @@ impl StudioSettingsUi {
                     atlas,
                     &hint,
                     rect[0] + 10.0,
-                    rect[1] + 31.0,
+                    rect[1] + 24.0,
                     style::MUTED,
                     false,
                 );
@@ -760,8 +780,8 @@ impl StudioSettingsUi {
                 y += Self::SECTION_H;
             }
             let rect = [viewport[0], y, viewport[2], Self::ROW_H - 4.0];
-            if rect[1] >= viewport[1]
-                && rect[1] + rect[3] <= viewport[1] + viewport[3]
+            if rect[1] + rect[3] >= viewport[1]
+                && rect[1] <= viewport[1] + viewport[3]
                 && ui::hovered(cursor, rect[0], rect[1], rect[2], rect[3])
             {
                 return action;
