@@ -15587,6 +15587,10 @@ impl Game<'_> {
                         let b = HudBatch::new([r.config.width, r.config.height]);
                         let previous = self.cursor;
                         self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
+                        if self.screen == Screen::Playing && self.studio_visuals.resizing_width {
+                            self.studio_visuals.handle_resize_drag(self.cursor.0, b.width);
+                            return Ok(());
+                        }
                         if self.screen == Screen::Playing
                             && (self.studio_timeline.dragging_playhead
                                 || self.studio_timeline.dragging_keyframe.is_some())
@@ -15936,6 +15940,10 @@ impl Game<'_> {
                 WindowEvent::MouseInput { state, button, .. } => {
                     let pressed = state == ElementState::Pressed;
                     if !pressed && button == MouseButton::Left {
+                        if self.studio_visuals.resizing_width {
+                            self.studio_visuals.resizing_width = false;
+                            self.save_studio_editor_preferences();
+                        }
                         let action = self.studio_timeline.handle_mouse_up();
                         if !matches!(action, horizon_client::studio::TimelineAction::None) {
                             self.handle_studio_timeline_action(action);

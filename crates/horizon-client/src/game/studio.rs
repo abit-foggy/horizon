@@ -43,6 +43,9 @@ impl Game<'_> {
         );
         self.studio_timeline.visible = preferences.timeline_visible;
         self.studio_visuals.open = preferences.visuals_open;
+        if preferences.visuals_width >= 160.0 {
+            self.studio_visuals.width = preferences.visuals_width.clamp(160.0, 500.0);
+        }
         self.studio_visuals.settings = preferences.visuals.clone();
         self.studio_visuals.global_settings = preferences.visuals;
     }
@@ -51,6 +54,7 @@ impl Game<'_> {
         let preferences = horizon_client::studio::editor_preferences::EditorPreferences {
             timeline_visible: self.studio_timeline.visible,
             visuals_open: self.studio_visuals.open,
+            visuals_width: self.studio_visuals.width,
             visuals: self.studio_visuals.settings.clone(),
         };
         preferences.save(&Self::studio_editor_preferences_path());

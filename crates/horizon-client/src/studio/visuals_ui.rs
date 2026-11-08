@@ -258,6 +258,7 @@ impl SettingsScope {
 pub struct VisualsUi {
     pub open: bool,
     pub width: f32,
+    pub resizing_width: bool,
     pub settings: VisualsSettings,
     pub scroll_y: f32,
     pub scope: SettingsScope,
@@ -272,6 +273,7 @@ impl Default for VisualsUi {
         Self {
             open: false,
             width: 195.0,
+            resizing_width: false,
             settings: default_settings.clone(),
             scroll_y: 0.0,
             scope: SettingsScope::Global,
@@ -283,6 +285,13 @@ impl Default for VisualsUi {
 }
 
 impl VisualsUi {
+    pub fn handle_resize_drag(&mut self, cursor_x: f32, screen_width: f32) {
+        if self.resizing_width {
+            let max_w = (screen_width * 0.6).clamp(240.0, 480.0);
+            let new_width = (screen_width - cursor_x).clamp(160.0, max_w);
+            self.width = new_width.round();
+        }
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -721,6 +730,20 @@ impl VisualsUi {
 
         // Background panel
         style::panel(batch, atlas, rect);
+
+        // Left resize border handle
+        let handle_hovered = cursor.0 >= panel_x - 3.0
+            && cursor.0 <= panel_x + 3.0
+            && cursor.1 >= panel_y
+            && cursor.1 <= panel_y + panel_h;
+        let handle_color = if self.resizing_width {
+            style::ACCENT
+        } else if handle_hovered {
+            0xAAFFFFFF
+        } else {
+            0x332D323F
+        };
+        style::fill(batch, atlas, [panel_x - 1.0, panel_y, 2.0, panel_h], handle_color);
 
         // Header
         let head_h = 22.0;
@@ -1252,6 +1275,17 @@ impl VisualsUi {
         let panel_h = (screen_h - top_offset - bottom_offset).max(80.0);
         let panel_x = screen_w - self.width;
         let panel_y = top_offset;
+
+        // Check if clicking on left resize handle
+        if cursor.0 >= panel_x - 4.0
+            && cursor.0 <= panel_x + 4.0
+            && cursor.1 >= panel_y
+            && cursor.1 <= panel_y + panel_h
+        {
+            self.resizing_width = true;
+            return true;
+        }
+
         if cursor.0 < panel_x
             || cursor.0 > screen_w
             || cursor.1 < panel_y
@@ -1830,4 +1864,23 @@ mod tests {
         settings.cycle_roll();
         assert_eq!(settings.camera_roll, -90.0);
     }
+
+    #[test]
+    fn visuals_sidebar_resizing_clamps_within_bounds() {
+        let mut ui = VisualsUi::new();
+        assert!(!ui.resizing_width);
+        ui.handle_resize_drag(500.0, 960.0);
+        assert_eq!(ui.width, 195.0);
+
+        ui.resizing_width = true;
+        ui.handle_resize_drag(700.0, 960.0);
+        assert_eq!(ui.width, 260.0);
+
+        ui.handle_resize_drag(900.0, 960.0);
+        assert_eq!(ui.width, 160.0);
+
+        ui.handle_resize_drag(100.0, 960.0);
+        assert_eq!(ui.width, 480.0);
+    }
 }
+

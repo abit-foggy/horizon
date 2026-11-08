@@ -13,6 +13,7 @@ pub const FILE: &str = "horizon-studio-editor.json";
 pub struct EditorPreferences {
     pub timeline_visible: bool,
     pub visuals_open: bool,
+    pub visuals_width: f32,
     pub visuals: VisualsSettings,
 }
 
@@ -21,6 +22,7 @@ impl Default for EditorPreferences {
         Self {
             timeline_visible: true,
             visuals_open: false,
+            visuals_width: 195.0,
             visuals: VisualsSettings::default(),
         }
     }
