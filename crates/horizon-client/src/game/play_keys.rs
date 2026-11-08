@@ -12,6 +12,11 @@ impl Game<'_> {
         if self.screen == Screen::Playing && self.studio_replay.is_some() {
             match key {
                 KeyCode::Escape => {
+                    if self.captured || self.studio_rmb_down {
+                        self.studio_rmb_down = false;
+                        self.capture(false);
+                        return Ok(());
+                    }
                     self.close_studio_replay();
                     return Ok(());
                 }
@@ -107,7 +112,7 @@ impl Game<'_> {
                     self.pause_focus = None;
                     self.screen = Screen::Playing;
                     self.pause_menu = true;
-                    self.capture(true);
+                    self.capture(self.studio_replay.is_none());
                 }
                 Screen::GameModeSwitcher => self.close_gamemode_switcher(false),
                 Screen::EmoteWheel => self.close_emote_wheel(None),

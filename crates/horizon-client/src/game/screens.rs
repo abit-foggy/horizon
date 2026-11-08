@@ -367,7 +367,7 @@ impl Game<'_> {
             0 => {
                 self.pause_focus = None;
                 self.screen = Screen::Playing;
-                self.capture(true);
+                self.capture(self.studio_replay.is_none());
             }
             1 => self.open_options(false),
             3 => self.open_stats(),
