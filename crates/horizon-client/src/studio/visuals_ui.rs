@@ -64,9 +64,6 @@ impl AspectRatio {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VisualsSettings {
-    // GUI section
-    pub gui_action_bar: bool,
-
     // World section
     pub world_blocks: bool,
     pub world_entities: bool,
@@ -100,8 +97,6 @@ pub struct VisualsSettings {
 impl Default for VisualsSettings {
     fn default() -> Self {
         Self {
-            gui_action_bar: true,
-
             world_blocks: true,
             world_entities: true,
             world_players: true,
@@ -842,30 +837,7 @@ impl VisualsUi {
             self.settings.editor_canvas_box,
         );
 
-        // Group 2: GUI
-        self.render_row_section(
-            batch,
-            atlas,
-            panel_x,
-            content_top,
-            content_bottom,
-            &mut row_y,
-            "horizon.studio.visuals.section.gui",
-        );
-        self.render_row_toggle(
-            batch,
-            atlas,
-            panel_x,
-            right,
-            content_top,
-            content_bottom,
-            &mut row_y,
-            cursor,
-            "horizon.studio.visuals.gui.action_bar",
-            self.settings.gui_action_bar,
-        );
-
-        // Group 3: World
+        // Group 2: World
         self.render_row_section(
             batch,
             atlas,
@@ -1348,21 +1320,7 @@ impl VisualsUi {
             return true;
         }
 
-        // Group 2: GUI
-        row_y += 16.0;
-        if Self::check_toggle(
-            cursor,
-            panel_x,
-            self.width,
-            content_top,
-            content_bottom,
-            self.scroll_y,
-            &mut row_y,
-        ) {
-            self.settings.gui_action_bar = !self.settings.gui_action_bar;
-            return true;
-        }
-        // Group 3: World
+        // Group 2: World
         row_y += 16.0;
         if Self::check_toggle(
             cursor,
@@ -1669,8 +1627,8 @@ mod tests {
     #[test]
     fn test_visuals_settings_defaults() {
         let v = VisualsSettings::default();
-        assert!(v.gui_action_bar);
         assert!(v.world_blocks);
+        assert!(v.world_entities);
         assert!(!v.override_fog);
         assert!(v.camera_path_3d);
         assert_eq!(v.aspect_ratio, AspectRatio::None);
@@ -1750,12 +1708,12 @@ mod tests {
         assert!(handled);
         assert!(!ui.settings.editor_canvas_box);
 
-        // 2. Group 2: GUI -> Action Bar (row_y = 44.0 + 17.0 + 16.0 = 77.0, y_screen = 46.0 + 77.0 = 123.0)
-        assert!(ui.settings.gui_action_bar);
-        // Click the Action Bar row at x = panel_x + 20.0, y = 127.0
+        // 2. Group 2: World -> Blocks (row_y = 44.0 + 17.0 + 16.0 = 77.0, y_screen = 46.0 + 77.0 = 123.0)
+        assert!(ui.settings.world_blocks);
+        // Click the World Blocks row at x = panel_x + 20.0, y = 127.0
         let handled = ui.handle_mouse_click((panel_x + 20.0, 127.0), screen_w, screen_h, 0.0);
         assert!(handled);
-        assert!(!ui.settings.gui_action_bar);
+        assert!(!ui.settings.world_blocks);
     }
 
     #[test]
@@ -1768,21 +1726,21 @@ mod tests {
         ui.toggle_scope();
         assert_eq!(ui.scope, SettingsScope::PerScene);
 
-        // In PerScene scope for scene 0: toggle the action bar off
-        ui.settings.gui_action_bar = false;
+        // In PerScene scope for scene 0: toggle world blocks off
+        ui.settings.world_blocks = false;
         ui.sync_active_settings();
 
         // Switch to scene 1: should have default (true)
         ui.set_active_scene(1);
-        assert!(ui.settings.gui_action_bar);
+        assert!(ui.settings.world_blocks);
 
         // Switch back to scene 0: should be false
         ui.set_active_scene(0);
-        assert!(!ui.settings.gui_action_bar);
+        assert!(!ui.settings.world_blocks);
 
         // Switch back to Global scope: should have global default (true)
         ui.set_scope(SettingsScope::Global);
-        assert!(ui.settings.gui_action_bar);
+        assert!(ui.settings.world_blocks);
     }
 
     #[test]
