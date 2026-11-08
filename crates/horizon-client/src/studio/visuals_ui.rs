@@ -820,36 +820,39 @@ impl VisualsUi {
         let panel_y = top_offset;
         let rect = [panel_x, panel_y, self.width, panel_h];
 
-        // Background panel
-        style::panel(batch, atlas, rect);
+        // Background panel: solid dark studio charcoal (opaque so sky never bleeds through as a white box)
+        style::fill(batch, atlas, rect, 0xFF14_161D);
+        style::fill(
+            batch,
+            atlas,
+            [panel_x, panel_y, 1.0, panel_h],
+            0xFF2D_323F,
+        );
 
         // Left resize border handle
         let handle_hovered = cursor.0 >= panel_x - 3.0
             && cursor.0 <= panel_x + 3.0
             && cursor.1 >= panel_y
             && cursor.1 <= panel_y + panel_h;
-        let handle_color = if self.resizing_width {
-            style::ACCENT
+        if self.resizing_width {
+            style::fill(batch, atlas, [panel_x - 1.0, panel_y, 2.0, panel_h], style::ACCENT);
         } else if handle_hovered {
-            0xAAFFFFFF
-        } else {
-            0x332D323F
-        };
-        style::fill(batch, atlas, [panel_x - 1.0, panel_y, 2.0, panel_h], handle_color);
+            style::fill(batch, atlas, [panel_x - 1.0, panel_y, 2.0, panel_h], 0xAAFF_FFFF);
+        }
 
-        // Header
+        // Header: solid studio header dark
         let head_h = 22.0;
         style::fill(
             batch,
             atlas,
             [panel_x, panel_y, self.width, head_h],
-            style::OPEN,
+            0xFF18_1B24,
         );
         style::fill(
             batch,
             atlas,
             [panel_x, panel_y + head_h - 1.0, self.width, 1.0],
-            style::HEAD_RULE,
+            0xFF2D_323F,
         );
 
         batch.text_styled(
