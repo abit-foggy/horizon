@@ -106,7 +106,7 @@ impl Default for TopBarUi {
     fn default() -> Self {
         Self {
             open_menu: None,
-            height: 22.0,
+            height: 24.0,
         }
     }
 }

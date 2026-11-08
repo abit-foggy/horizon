@@ -7911,13 +7911,6 @@ impl Game<'_> {
             batch.studio_editor_at = Some(batch.vertices.len() as u32);
             self.studio_visuals
                 .render_guides(&mut batch, &self.gui.atlas, timeline_bottom);
-            self.studio_topbar.render(
-                &mut batch,
-                &self.gui.atlas,
-                self.cursor,
-                self.studio_freecam.locked_to_path,
-                &self.settings.keys,
-            );
             self.studio_timeline.render(
                 &mut batch,
                 &self.gui.atlas,
@@ -7928,11 +7921,14 @@ impl Game<'_> {
                 &mut batch,
                 &self.gui.atlas,
                 self.cursor,
-                if self.studio_timeline.visible {
-                    self.studio_timeline.height()
-                } else {
-                    0.0
-                },
+                timeline_bottom,
+            );
+            self.studio_topbar.render(
+                &mut batch,
+                &self.gui.atlas,
+                self.cursor,
+                self.studio_freecam.locked_to_path,
+                &self.settings.keys,
             );
         }
         batch
