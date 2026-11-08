@@ -15955,8 +15955,13 @@ impl Game<'_> {
                         if let Some(renderer) = &self.renderer {
                             let batch =
                                 HudBatch::new([renderer.config.width, renderer.config.height]);
+                            let timeline_bottom = if self.studio_timeline.visible {
+                                self.studio_timeline.height()
+                            } else {
+                                0.0
+                            };
                             if self.studio_timeline.visible
-                                && self.cursor.1 >= batch.height - self.studio_timeline.height()
+                                && self.cursor.1 >= batch.height - timeline_bottom
                             {
                                 if pressed
                                     && let Some(index) = self.studio_timeline.keyframe_at_cursor(
@@ -15973,6 +15978,30 @@ impl Game<'_> {
                                     self.studio_timeline.selected_keyframe = None;
                                 }
                                 return Ok(());
+                            }
+                            if pressed {
+                                if self.cursor.1 <= self.studio_topbar.height {
+                                    return Ok(());
+                                }
+                                if self.studio_visuals.open
+                                    && self.cursor.0 >= batch.width - self.studio_visuals.width
+                                {
+                                    return Ok(());
+                                }
+                                if self.studio_visuals.settings.editor_canvas_box {
+                                    let [cx, cy, cw, ch] = self.studio_visuals.comp_box_rect(
+                                        batch.width,
+                                        batch.height,
+                                        timeline_bottom,
+                                    );
+                                    if self.cursor.0 < cx
+                                        || self.cursor.0 > cx + cw
+                                        || self.cursor.1 < cy
+                                        || self.cursor.1 > cy + ch
+                                    {
+                                        return Ok(());
+                                    }
+                                }
                             }
                         }
                         if pressed {
