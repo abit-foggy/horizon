@@ -7918,12 +7918,8 @@ impl Game<'_> {
                 &self.studio_freecam,
                 self.studio_visuals.settings.editor_canvas_box,
             );
-            self.studio_visuals.render(
-                &mut batch,
-                &self.gui.atlas,
-                self.cursor,
-                timeline_bottom,
-            );
+            self.studio_visuals
+                .render(&mut batch, &self.gui.atlas, self.cursor, timeline_bottom);
             self.studio_topbar.render(
                 &mut batch,
                 &self.gui.atlas,
@@ -14306,10 +14302,16 @@ impl Game<'_> {
         self.locator_camera =
             (!title).then_some((camera.to_array(), view_yaw, view_pitch, fov_degrees));
         let requested_post_effects = self.requested_post_effects();
-        self.view_frustum = self
-            .renderer
-            .as_ref()
-            .map(|r| r.camera_frustum(fov_degrees, yaw, pitch, bob * spin, depth_far, studio_comp_box));
+        self.view_frustum = self.renderer.as_ref().map(|r| {
+            r.camera_frustum(
+                fov_degrees,
+                yaw,
+                pitch,
+                bob * spin,
+                depth_far,
+                studio_comp_box,
+            )
+        });
         let billboard_frustum = if self.settings.horizon.taa {
             self.renderer.as_ref().map(|r| {
                 r.camera_frustum_with_jitter(
@@ -15589,7 +15591,8 @@ impl Game<'_> {
                         let previous = self.cursor;
                         self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
                         if self.screen == Screen::Playing && self.studio_visuals.resizing_width {
-                            self.studio_visuals.handle_resize_drag(self.cursor.0, b.width);
+                            self.studio_visuals
+                                .handle_resize_drag(self.cursor.0, b.width);
                             return Ok(());
                         }
                         if self.screen == Screen::Playing

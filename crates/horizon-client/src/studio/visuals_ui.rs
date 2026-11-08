@@ -7,8 +7,8 @@
 //! Vertically constrained between the macOS top bar and bottom timeline, with mouse-wheel
 //! scrolling, scrollbar thumb, and multi-option presets.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use horizon_client_render::{
     graphics_style as style,
@@ -453,7 +453,12 @@ impl VisualsUi {
         let bottom = ((y + height) * scale_y)
             .round()
             .clamp(top as f32, framebuffer_size[1] as f32) as u32;
-        Some([left, top, right.saturating_sub(left).max(1), bottom.saturating_sub(top).max(1)])
+        Some([
+            left,
+            top,
+            right.saturating_sub(left).max(1),
+            bottom.saturating_sub(top).max(1),
+        ])
     }
 
     /// Render framing guides (Rule of Thirds, Center Guide, Aspect Ratio matte bars, AE Composition Box).
@@ -463,7 +468,11 @@ impl VisualsUi {
         let (guide_x, guide_y, guide_w, guide_h) = if self.settings.editor_canvas_box {
             let [comp_x, comp_y, comp_w, comp_h] = self.comp_box_rect(w, h, bottom_offset);
             let top_offset = Self::TOP_OFFSET;
-            let workspace_w = if self.open { (w - self.width).max(0.0) } else { w };
+            let workspace_w = if self.open {
+                (w - self.width).max(0.0)
+            } else {
+                w
+            };
 
             // Workspace dark charcoal matte surrounding the composition box (strictly bounded by workspace_w)
             let matte_color = 0xFF14_161D;
@@ -554,12 +563,7 @@ impl VisualsUi {
             // Extensible Composition Tab Bar header spanning comp_w directly atop composition canvas
             let tab_bar_rect = [comp_x, tab_bar_y, comp_w, Self::TAB_BAR_HEIGHT];
             style::fill(batch, atlas, tab_bar_rect, 0xFF18_1B22);
-            style::fill(
-                batch,
-                atlas,
-                [comp_x, tab_bar_y, comp_w, 1.0],
-                0xFF36_3D4D,
-            );
+            style::fill(batch, atlas, [comp_x, tab_bar_y, comp_w, 1.0], 0xFF36_3D4D);
             style::fill(
                 batch,
                 atlas,
@@ -590,12 +594,7 @@ impl VisualsUi {
                 if is_active {
                     style::fill(batch, atlas, tab_rect, 0xFF28_2E3B);
                     // Active top accent line matching tab width exactly
-                    style::fill(
-                        batch,
-                        atlas,
-                        [tab_x, tab_bar_y, tab_w, 2.0],
-                        style::ACCENT,
-                    );
+                    style::fill(batch, atlas, [tab_x, tab_bar_y, tab_w, 2.0], style::ACCENT);
                 }
 
                 // Separator line between tabs
@@ -603,7 +602,12 @@ impl VisualsUi {
                     style::fill(
                         batch,
                         atlas,
-                        [tab_x + tab_w - 1.0, tab_bar_y + 3.0, 1.0, Self::TAB_BAR_HEIGHT - 6.0],
+                        [
+                            tab_x + tab_w - 1.0,
+                            tab_bar_y + 3.0,
+                            1.0,
+                            Self::TAB_BAR_HEIGHT - 6.0,
+                        ],
                         if is_active { 0xFF3E_4759 } else { 0xFF2A_303C },
                     );
                 }
@@ -616,7 +620,11 @@ impl VisualsUi {
                     &Text::literal(fitted_title),
                     tab_x + 8.0,
                     tab_bar_y + 6.0,
-                    if is_active { style::WHITE } else { style::MUTED },
+                    if is_active {
+                        style::WHITE
+                    } else {
+                        style::MUTED
+                    },
                     true,
                 );
 
@@ -722,27 +730,38 @@ impl VisualsUi {
             );
 
             // Aspect Ratio Matte Bars (Letterbox / Pillarbox) overlay inside composition box
-            let (active_x, active_y, active_w, active_h) = if let Some(target) = self.settings.aspect_ratio.target_ratio() {
-                let current = comp_w / comp_h;
-                let matte_color = 0xFF00_0000;
-                if current > target {
-                    let active_w = (comp_h * target).round();
-                    let bar_w = ((comp_w - active_w) * 0.5).round();
-                    style::fill(batch, atlas, [comp_x, comp_y, bar_w, comp_h], matte_color);
-                    style::fill(batch, atlas, [comp_x + comp_w - bar_w, comp_y, bar_w, comp_h], matte_color);
-                    (comp_x + bar_w, comp_y, active_w, comp_h)
-                } else if current < target {
-                    let active_h = (comp_w / target).round();
-                    let bar_h = ((comp_h - active_h) * 0.5).round();
-                    style::fill(batch, atlas, [comp_x, comp_y, comp_w, bar_h], matte_color);
-                    style::fill(batch, atlas, [comp_x, comp_y + comp_h - bar_h, comp_w, bar_h], matte_color);
-                    (comp_x, comp_y + bar_h, comp_w, active_h)
+            let (active_x, active_y, active_w, active_h) =
+                if let Some(target) = self.settings.aspect_ratio.target_ratio() {
+                    let current = comp_w / comp_h;
+                    let matte_color = 0xFF00_0000;
+                    if current > target {
+                        let active_w = (comp_h * target).round();
+                        let bar_w = ((comp_w - active_w) * 0.5).round();
+                        style::fill(batch, atlas, [comp_x, comp_y, bar_w, comp_h], matte_color);
+                        style::fill(
+                            batch,
+                            atlas,
+                            [comp_x + comp_w - bar_w, comp_y, bar_w, comp_h],
+                            matte_color,
+                        );
+                        (comp_x + bar_w, comp_y, active_w, comp_h)
+                    } else if current < target {
+                        let active_h = (comp_w / target).round();
+                        let bar_h = ((comp_h - active_h) * 0.5).round();
+                        style::fill(batch, atlas, [comp_x, comp_y, comp_w, bar_h], matte_color);
+                        style::fill(
+                            batch,
+                            atlas,
+                            [comp_x, comp_y + comp_h - bar_h, comp_w, bar_h],
+                            matte_color,
+                        );
+                        (comp_x, comp_y + bar_h, comp_w, active_h)
+                    } else {
+                        (comp_x, comp_y, comp_w, comp_h)
+                    }
                 } else {
                     (comp_x, comp_y, comp_w, comp_h)
-                }
-            } else {
-                (comp_x, comp_y, comp_w, comp_h)
-            };
+                };
 
             (active_x, active_y, active_w, active_h)
         } else {
@@ -822,12 +841,7 @@ impl VisualsUi {
 
         // Background panel: solid dark studio charcoal (opaque so sky never bleeds through as a white box)
         style::fill(batch, atlas, rect, 0xFF14_161D);
-        style::fill(
-            batch,
-            atlas,
-            [panel_x, panel_y, 1.0, panel_h],
-            0xFF2D_323F,
-        );
+        style::fill(batch, atlas, [panel_x, panel_y, 1.0, panel_h], 0xFF2D_323F);
 
         // Left resize border handle
         let handle_hovered = cursor.0 >= panel_x - 3.0
@@ -835,9 +849,19 @@ impl VisualsUi {
             && cursor.1 >= panel_y
             && cursor.1 <= panel_y + panel_h;
         if self.resizing_width {
-            style::fill(batch, atlas, [panel_x - 1.0, panel_y, 2.0, panel_h], style::ACCENT);
+            style::fill(
+                batch,
+                atlas,
+                [panel_x - 1.0, panel_y, 2.0, panel_h],
+                style::ACCENT,
+            );
         } else if handle_hovered {
-            style::fill(batch, atlas, [panel_x - 1.0, panel_y, 2.0, panel_h], 0xAAFF_FFFF);
+            style::fill(
+                batch,
+                atlas,
+                [panel_x - 1.0, panel_y, 2.0, panel_h],
+                0xAAFF_FFFF,
+            );
         }
 
         // Header: solid studio header dark
@@ -1877,7 +1901,10 @@ mod tests {
         // 1. When sidebar is closed: centered within full screen_w
         ui.open = false;
         let [x1, y1, w1, h1] = ui.comp_box_rect(screen_w, screen_h, bottom_offset);
-        assert!(y1 >= VisualsUi::TOP_OFFSET, "comp box y must be below top bar");
+        assert!(
+            y1 >= VisualsUi::TOP_OFFSET,
+            "comp box y must be below top bar"
+        );
         assert!(
             y1 + h1 <= screen_h - bottom_offset,
             "comp box bottom must be above timeline"
@@ -1911,19 +1938,25 @@ mod tests {
     #[test]
     fn composition_viewport_tracks_framebuffer_scale_and_toggle() {
         let mut ui = VisualsUi::new();
-        assert_eq!(ui.comp_box_viewport([960.0, 540.0], [1920, 1080], 60.0), None);
+        assert_eq!(
+            ui.comp_box_viewport([960.0, 540.0], [1920, 1080], 60.0),
+            None
+        );
 
         ui.settings.editor_canvas_box = true;
         let viewport = ui
             .comp_box_viewport([960.0, 540.0], [1920, 1080], 60.0)
             .expect("composition viewport is enabled");
         let [x, y, width, height] = ui.comp_box_rect(960.0, 540.0, 60.0);
-        assert_eq!(viewport, [
-            (x * 2.0).round() as u32,
-            (y * 2.0).round() as u32,
-            (width * 2.0).round() as u32,
-            (height * 2.0).round() as u32,
-        ]);
+        assert_eq!(
+            viewport,
+            [
+                (x * 2.0).round() as u32,
+                (y * 2.0).round() as u32,
+                (width * 2.0).round() as u32,
+                (height * 2.0).round() as u32,
+            ]
+        );
         assert!(viewport[0] + viewport[2] <= 1920);
         assert!(viewport[1] + viewport[3] <= 1080);
     }
@@ -2015,7 +2048,10 @@ mod tests {
         ui.open = true;
         ui.width = 300.0;
         let [x2, y2, w2, _] = ui.comp_box_rect(screen_w, screen_h, bottom_offset);
-        assert!(w2 < w1, "composition box and tab bar resize dynamically with sidebar");
+        assert!(
+            w2 < w1,
+            "composition box and tab bar resize dynamically with sidebar"
+        );
         assert!(y2 - VisualsUi::TAB_BAR_HEIGHT >= VisualsUi::TOP_OFFSET);
 
         // Close second tab via close button at right of tab 2
@@ -2027,4 +2063,3 @@ mod tests {
         assert_eq!(ui.tabs.active_index(), 0);
     }
 }
-

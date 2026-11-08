@@ -10144,11 +10144,7 @@ impl Renderer {
                 timestamp_writes: native.timing.as_mut().and_then(|t| t.writes(&sky.label)),
                 ..Default::default()
             });
-            apply_comp_box(
-                &mut pass,
-                world_comp_box,
-                world_target_size,
-            );
+            apply_comp_box(&mut pass, world_comp_box, world_target_size);
             pass.set_bind_group(0, &self.group, &[]);
             sky.draw(&mut pass, &native.frame);
         }
@@ -10382,11 +10378,7 @@ impl Renderer {
                 }),
                 ..Default::default()
             });
-            apply_comp_box(
-                &mut pass,
-                world_comp_box,
-                world_target_size,
-            );
+            apply_comp_box(&mut pass, world_comp_box, world_target_size);
             pass.set_bind_group(0, &self.group, &[]);
             pack_frame(&mut pass);
             if frame.title || (sky_visible && (frame.skybox || frame.end_sky)) {

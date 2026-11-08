@@ -9,10 +9,10 @@ pub mod path_render;
 pub mod recorder;
 pub mod replay;
 pub mod spline;
+pub mod tabs;
 pub mod timeline_ui;
 pub mod topbar;
 pub mod visuals_ui;
-pub mod tabs;
 
 pub use camera::StudioFreecam;
 pub use mcpr::{

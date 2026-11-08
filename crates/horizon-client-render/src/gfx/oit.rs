@@ -724,13 +724,7 @@ impl Oit {
                 features(&mut pass, stage);
             }
             if stage == Stage::DepthBounds {
-                self.execute_depth_bounds_cull(
-                    encoder,
-                    t,
-                    depth,
-                    timing.as_deref_mut(),
-                    comp_box,
-                );
+                self.execute_depth_bounds_cull(encoder, t, depth, timing.as_deref_mut(), comp_box);
             }
             if let Some((clouds, cloud_depth)) = cloud_depth {
                 self.render_clouds(

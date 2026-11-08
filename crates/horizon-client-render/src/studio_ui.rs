@@ -662,41 +662,33 @@ impl StudioSettingsUi {
         let mut y = viewport[1] - self.scroll.min(max_scroll);
         let mut section = None;
         for (new_section, label, description, _action, enabled) in rows {
-            if let Some(key) = new_section {
-                if section != Some(key) {
-                    section = Some(key);
-                    if y + 18.0 >= viewport[1] && y <= viewport[1] + viewport[3] {
-                        style::fill(
-                            batch,
-                            atlas,
-                            [viewport[0], y, viewport[2], 18.0],
-                            style::ROW_RULE,
-                        );
-                        batch.text_styled(
-                            atlas,
-                            &Text::translate(key, &[]),
-                            viewport[0] + 4.0,
-                            y + 2.0,
-                            style::SOFT,
-                            true,
-                        );
-                    }
-                    y += Self::SECTION_H;
+            if let Some(key) = new_section
+                && section != Some(key)
+            {
+                section = Some(key);
+                if y + 18.0 >= viewport[1] && y <= viewport[1] + viewport[3] {
+                    style::fill(
+                        batch,
+                        atlas,
+                        [viewport[0], y, viewport[2], 18.0],
+                        style::ROW_RULE,
+                    );
+                    batch.text_styled(
+                        atlas,
+                        &Text::translate(key, &[]),
+                        viewport[0] + 4.0,
+                        y + 2.0,
+                        style::SOFT,
+                        true,
+                    );
                 }
+                y += Self::SECTION_H;
             }
             let rect = [viewport[0], y, viewport[2], Self::ROW_H - 4.0];
             if rect[1] + rect[3] >= viewport[1] && rect[1] <= viewport[1] + viewport[3] {
                 let hovered = ui::hovered(cursor, rect[0], rect[1], rect[2], rect[3]);
-                let bg = if hovered {
-                    0x2AFFFFFF
-                } else {
-                    0x12FFFFFF
-                };
-                let ring_color = if hovered {
-                    style::WHITE
-                } else {
-                    0x22FFFFFF
-                };
+                let bg = if hovered { 0x2AFFFFFF } else { 0x12FFFFFF };
+                let ring_color = if hovered { style::WHITE } else { 0x22FFFFFF };
                 style::fill(batch, atlas, rect, bg);
                 style::ring(batch, atlas, rect, ring_color);
 

@@ -26,7 +26,16 @@ impl View {
 }
 struct Settings { fov: f32 }
 struct StudioFreecam { active: bool, fov: f32 }
-struct Game { view: View, settings: Settings, override_fov: Option<f32>, studio_freecam: StudioFreecam }
+struct StudioVisualsSettings { override_fov: bool, fov_value: f32 }
+struct StudioVisuals { settings: StudioVisualsSettings }
+struct Game {
+    view: View,
+    settings: Settings,
+    override_fov: Option<f32>,
+    studio_freecam: StudioFreecam,
+    studio_replay: Option<()>,
+    studio_visuals: StudioVisuals,
+}
 impl Game {
     fn fov_effect_scale(&self) -> f32 { 1.0 }
     fn death_time(&self) -> Option<i32> { None }
@@ -43,16 +52,40 @@ fn unchanged_narrow_wide_and_invalid() {
     for (value, expected) in [(None, 35.0), (Some(15.0), 15.0), (Some(120.0), 120.0),
         (Some(1.0), 1.0), (Some(179.0), 179.0), (Some(0.0), 35.0), (Some(180.0), 35.0),
         (Some(-1.0), 35.0), (Some(f32::NAN), 35.0), (Some(f32::INFINITY), 35.0)] {
-        let game = Game { view: View, settings: Settings { fov: 70.0 }, override_fov: value,
-            studio_freecam: StudioFreecam { active: false, fov: 70.0 } };
+        let game = Game {
+            view: View,
+            settings: Settings { fov: 70.0 },
+            override_fov: value,
+            studio_freecam: StudioFreecam { active: false, fov: 70.0 },
+            studio_replay: None,
+            studio_visuals: StudioVisuals { settings: StudioVisualsSettings { override_fov: false, fov_value: 70.0 } },
+        };
         assert_eq!(game.fov_degrees(0.25, [1.0, 2.0, 3.0]), expected);
     }
 }
 #[test]
 fn studio_freecam_uses_its_fov() {
-    let game = Game { view: View, settings: Settings { fov: 70.0 }, override_fov: None,
-        studio_freecam: StudioFreecam { active: true, fov: 42.0 } };
+    let game = Game {
+        view: View,
+        settings: Settings { fov: 70.0 },
+        override_fov: None,
+        studio_freecam: StudioFreecam { active: true, fov: 42.0 },
+        studio_replay: None,
+        studio_visuals: StudioVisuals { settings: StudioVisualsSettings { override_fov: false, fov_value: 70.0 } },
+    };
     assert_eq!(game.fov_degrees(0.25, [1.0, 2.0, 3.0]), 42.0);
+}
+#[test]
+fn studio_visuals_fov_override_takes_precedence() {
+    let game = Game {
+        view: View,
+        settings: Settings { fov: 70.0 },
+        override_fov: None,
+        studio_freecam: StudioFreecam { active: true, fov: 42.0 },
+        studio_replay: Some(()),
+        studio_visuals: StudioVisuals { settings: StudioVisualsSettings { override_fov: true, fov_value: 85.0 } },
+    };
+    assert_eq!(game.fov_degrees(0.25, [1.0, 2.0, 3.0]), 85.0);
 }
 """.replace("METHOD", actual)
         with tempfile.TemporaryDirectory() as folder:

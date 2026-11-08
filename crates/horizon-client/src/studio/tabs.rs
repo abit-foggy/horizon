@@ -44,9 +44,10 @@ pub struct StudioTabSystem {
 impl Default for StudioTabSystem {
     fn default() -> Self {
         Self {
-            tabs: vec![
-                StudioTab::new("composition", "horizon.studio.visuals.composition.active_camera"),
-            ],
+            tabs: vec![StudioTab::new(
+                "composition",
+                "horizon.studio.visuals.composition.active_camera",
+            )],
             active_index: 0,
         }
     }
@@ -153,7 +154,10 @@ mod tests {
 
         assert!(tabs.select_tab(1));
         assert_eq!(tabs.active_tab().unwrap().id, "preview");
-        assert_eq!(tabs.active_tab().unwrap().mod_id.as_deref(), Some("camera_tools"));
+        assert_eq!(
+            tabs.active_tab().unwrap().mod_id.as_deref(),
+            Some("camera_tools")
+        );
 
         assert!(tabs.select_tab_by_id("composition"));
         assert_eq!(tabs.active_index(), 0);
