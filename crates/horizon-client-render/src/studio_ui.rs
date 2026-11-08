@@ -841,13 +841,14 @@ mod tests {
         let ui = StudioSettingsUi::default();
         let size = (800.0, 600.0);
         let settings = crate::studio_preferences::StudioPreferences::default();
+        let (_, _, done) = StudioSettingsUi::geometry(size);
         for (cursor, expected) in [
-            ((300.0, 130.0), StudioSettingsAction::ToggleSkins),
-            ((300.0, 184.0), StudioSettingsAction::ToggleNames),
-            ((300.0, 256.0), StudioSettingsAction::ToggleSounds),
-            ((300.0, 332.0), StudioSettingsAction::ToggleModsManifest),
-            ((300.0, 386.0), StudioSettingsAction::ToggleResourcePack),
-            ((620.0, 580.0), StudioSettingsAction::Back),
+            ((300.0, 100.0), StudioSettingsAction::ToggleSkins),
+            ((300.0, 145.0), StudioSettingsAction::ToggleNames),
+            ((300.0, 210.0), StudioSettingsAction::ToggleSounds),
+            ((300.0, 275.0), StudioSettingsAction::ToggleModsManifest),
+            ((300.0, 325.0), StudioSettingsAction::ToggleResourcePack),
+            ((done[0] + 10.0, done[1] + 5.0), StudioSettingsAction::Back),
             ((40.0, 40.0), StudioSettingsAction::None),
         ] {
             assert_eq!(ui.click(cursor, size, &settings), expected);
@@ -862,7 +863,7 @@ mod tests {
         let (_, viewport, _) = StudioSettingsUi::geometry(size);
         assert!(ui.wheel(-3.0, size, (viewport[0] + 2.0, viewport[1] + 2.0)));
         assert_eq!(
-            ui.click((viewport[0] + 2.0, viewport[1] + 84.0), size, &settings),
+            ui.click((viewport[0] + 2.0, viewport[1] + 110.0), size, &settings),
             StudioSettingsAction::ToggleModsManifest
         );
     }
