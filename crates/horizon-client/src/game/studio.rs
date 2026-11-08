@@ -956,9 +956,7 @@ impl Game<'_> {
         };
         let mods_json = self.settings.studio.include_mods_manifest.then(|| {
             let mut required = Vec::new();
-            let mods_dir = std::env::current_dir()
-                .unwrap_or_default()
-                .join(horizon_client::mod_list::DIR);
+            let mods_dir = Self::game_dir().join(horizon_client::mod_list::DIR);
             for path in horizon_mods::find(&mods_dir) {
                 if let Ok(package) = horizon_mods::Package::read(&path)
                     && self.settings.mods.enabled.contains(&package.manifest.id)
