@@ -260,6 +260,7 @@ pub struct VisualsUi {
     pub active_scene: usize,
     pub global_settings: VisualsSettings,
     pub scene_settings: HashMap<usize, VisualsSettings>,
+    pub tabs: crate::studio::tabs::StudioTabSystem,
 }
 
 impl Default for VisualsUi {
@@ -275,6 +276,7 @@ impl Default for VisualsUi {
             active_scene: 0,
             global_settings: default_settings,
             scene_settings: HashMap::new(),
+            tabs: crate::studio::tabs::StudioTabSystem::default(),
         }
     }
 }
@@ -354,6 +356,7 @@ impl VisualsUi {
     }
 
     pub const TOP_OFFSET: f32 = crate::studio::topbar::TopBarUi::HEIGHT;
+    pub const TAB_BAR_HEIGHT: f32 = crate::studio::tabs::StudioTabSystem::BAR_HEIGHT;
 
     /// Check if cursor is hovered over the visuals sidebar.
     pub fn is_hovered(
@@ -391,15 +394,16 @@ impl VisualsUi {
     }
 
     /// Calculate the composition box bounds `[x, y, w, h]` strictly constrained between
-    /// the top menu bar (y = 20) and timeline (y = screen_h - bottom_offset), and offset horizontally
+    /// the top menu bar (y = 20) + tab bar and timeline (y = screen_h - bottom_offset), and offset horizontally
     /// when the visuals sidebar is open.
     pub fn comp_box_rect(&self, screen_w: f32, screen_h: f32, bottom_offset: f32) -> [f32; 4] {
         let top_offset = Self::TOP_OFFSET;
+        let tab_bar_h = Self::TAB_BAR_HEIGHT;
         let right_offset = if self.open { self.width } else { 0.0 };
         let workspace_x = 0.0;
-        let workspace_y = top_offset;
+        let workspace_y = top_offset + tab_bar_h;
         let workspace_w = (screen_w - right_offset).max(10.0);
-        let workspace_h = (screen_h - top_offset - bottom_offset).max(10.0);
+        let workspace_h = (screen_h - workspace_y - bottom_offset).max(10.0);
 
         let pad_x = (workspace_w * 0.05).round().max(16.0);
         let pad_y = (workspace_h * 0.05).round().max(16.0);
@@ -461,12 +465,33 @@ impl VisualsUi {
 
             // Workspace dark charcoal matte surrounding the composition box
             let matte_color = 0xFF14_161D;
-            // Top matte (between topbar and comp box)
-            if comp_y > top_offset {
+            let tab_bar_y = comp_y - Self::TAB_BAR_HEIGHT;
+            // Top matte (between topbar and tab bar)
+            if tab_bar_y > top_offset {
                 style::fill(
                     batch,
                     atlas,
-                    [0.0, top_offset, w, comp_y - top_offset],
+                    [0.0, top_offset, w, tab_bar_y - top_offset],
+                    matte_color,
+                );
+            }
+            // Left of tab bar matte
+            if comp_x > 0.0 {
+                style::fill(
+                    batch,
+                    atlas,
+                    [0.0, tab_bar_y, comp_x, Self::TAB_BAR_HEIGHT],
+                    matte_color,
+                );
+            }
+            // Right of tab bar matte
+            let right_tab_x = comp_x + comp_w;
+            let right_tab_w = (w - right_tab_x).max(0.0);
+            if right_tab_w > 0.0 {
+                style::fill(
+                    batch,
+                    atlas,
+                    [right_tab_x, tab_bar_y, right_tab_w, Self::TAB_BAR_HEIGHT],
                     matte_color,
                 );
             }
@@ -524,38 +549,94 @@ impl VisualsUi {
                 border_color,
             );
 
-            // Composition header label badge
-            let badge_label = Text::translate("horizon.studio.visuals.composition.active_camera", &[]);
-            let text_width = atlas.font.width_text(&badge_label.resolved());
-            let badge_w = (text_width + 16.0).max(180.0);
-            let badge_h = 18.0;
-            let badge_y = (comp_y - badge_h).max(top_offset);
+            // Extensible Composition Tab Bar header spanning comp_w directly atop composition canvas
+            let tab_bar_rect = [comp_x, tab_bar_y, comp_w, Self::TAB_BAR_HEIGHT];
+            style::fill(batch, atlas, tab_bar_rect, 0xFF18_1B22);
             style::fill(
                 batch,
                 atlas,
-                [comp_x, badge_y, badge_w, badge_h],
-                0xFF2A_303C,
-            );
-            style::ring(
-                batch,
-                atlas,
-                [comp_x, badge_y, badge_w, badge_h],
-                0xFF4A_5468,
+                [comp_x, tab_bar_y, comp_w, 1.0],
+                0xFF36_3D4D,
             );
             style::fill(
                 batch,
                 atlas,
-                [comp_x, badge_y, badge_w, 2.0],
-                style::ACCENT,
+                [comp_x - 1.0, tab_bar_y, 1.0, Self::TAB_BAR_HEIGHT],
+                0xFF36_3D4D,
             );
-            batch.text_styled(
+            style::fill(
+                batch,
                 atlas,
-                &badge_label,
-                comp_x + 8.0,
-                badge_y + 5.0,
-                style::WHITE,
-                true,
+                [comp_x + comp_w, tab_bar_y, 1.0, Self::TAB_BAR_HEIGHT],
+                0xFF36_3D4D,
             );
+
+            let mut tab_x = comp_x;
+            for (idx, tab) in self.tabs.tabs().iter().enumerate() {
+                let is_active = idx == self.tabs.active_index();
+                let title = if let Some(custom) = &tab.custom_title {
+                    Text::literal(custom.clone())
+                } else {
+                    Text::translate(&tab.title_key, &[])
+                };
+                let text_w = atlas.font.width_text(&title.resolved());
+                let close_w = if tab.closable { 14.0 } else { 0.0 };
+                let tab_w = (text_w + 20.0 + close_w).clamp(80.0, 180.0);
+
+                if tab_x + tab_w > comp_x + comp_w - 10.0 && idx > 0 {
+                    break;
+                }
+
+                let tab_rect = [tab_x, tab_bar_y + 1.0, tab_w, Self::TAB_BAR_HEIGHT - 1.0];
+                if is_active {
+                    style::fill(batch, atlas, tab_rect, 0xFF28_2E3B);
+                    // Active top accent line
+                    style::fill(
+                        batch,
+                        atlas,
+                        [tab_x, tab_bar_y, tab_w, 2.0],
+                        style::ACCENT,
+                    );
+                    // Right separator
+                    style::fill(
+                        batch,
+                        atlas,
+                        [tab_x + tab_w - 1.0, tab_bar_y + 3.0, 1.0, Self::TAB_BAR_HEIGHT - 6.0],
+                        0xFF3E_4759,
+                    );
+                } else {
+                    // Inactive right separator
+                    style::fill(
+                        batch,
+                        atlas,
+                        [tab_x + tab_w - 1.0, tab_bar_y + 4.0, 1.0, Self::TAB_BAR_HEIGHT - 8.0],
+                        0xFF2A_303C,
+                    );
+                }
+
+                batch.text_styled(
+                    atlas,
+                    &title,
+                    tab_x + 8.0,
+                    tab_bar_y + 6.0,
+                    if is_active { style::WHITE } else { style::MUTED },
+                    true,
+                );
+
+                if tab.closable {
+                    let close_x = tab_x + tab_w - 14.0;
+                    batch.text_styled(
+                        atlas,
+                        &Text::literal("x"),
+                        close_x + 2.0,
+                        tab_bar_y + 5.0,
+                        style::MUTED,
+                        true,
+                    );
+                }
+
+                tab_x += tab_w;
+            }
 
             // Resolution/zoom badge at bottom-right
             style::fill(
@@ -1238,7 +1319,7 @@ impl VisualsUi {
         *y += 18.0;
     }
 
-    /// Handle mouse click inside sidebar. Returns true if handled.
+    /// Handle mouse click inside composition tab bar or sidebar. Returns true if handled.
     pub fn handle_mouse_click(
         &mut self,
         cursor: (f32, f32),
@@ -1246,6 +1327,35 @@ impl VisualsUi {
         screen_h: f32,
         bottom_offset: f32,
     ) -> bool {
+        if self.settings.editor_canvas_box {
+            let [comp_x, comp_y, comp_w, _] = self.comp_box_rect(screen_w, screen_h, bottom_offset);
+            let tab_bar_y = comp_y - Self::TAB_BAR_HEIGHT;
+            if cursor.0 >= comp_x
+                && cursor.0 <= comp_x + comp_w
+                && cursor.1 >= tab_bar_y
+                && cursor.1 <= tab_bar_y + Self::TAB_BAR_HEIGHT
+            {
+                let mut tab_x = comp_x;
+                for (idx, tab) in self.tabs.tabs().iter().enumerate() {
+                    let title_len = tab.custom_title.as_ref().map(|s| s.len()).unwrap_or(14);
+                    let tab_w = crate::studio::tabs::StudioTabSystem::tab_width(title_len, tab.closable);
+                    if tab_x + tab_w > comp_x + comp_w - 10.0 && idx > 0 {
+                        break;
+                    }
+                    if tab.closable && cursor.0 >= tab_x + tab_w - 16.0 && cursor.0 <= tab_x + tab_w {
+                        self.tabs.close_tab_at(idx);
+                        return true;
+                    }
+                    if cursor.0 >= tab_x && cursor.0 <= tab_x + tab_w {
+                        self.tabs.select_tab(idx);
+                        return true;
+                    }
+                    tab_x += tab_w;
+                }
+                return true;
+            }
+        }
+
         let handled = self.handle_mouse_click_inner(cursor, screen_w, screen_h, bottom_offset);
         if handled {
             self.sync_active_settings();
@@ -1880,6 +1990,46 @@ mod tests {
             default_rect,
             "4:3 should preserve fixed 16:9 canvas size"
         );
+    }
+
+    #[test]
+    fn test_tabs_resize_with_composition_and_can_be_selected() {
+        let mut ui = VisualsUi::new();
+        ui.settings.editor_canvas_box = true;
+        let screen_w = 1920.0;
+        let screen_h = 1080.0;
+        let bottom_offset = 120.0;
+
+        let [x1, y1, w1, _] = ui.comp_box_rect(screen_w, screen_h, bottom_offset);
+        assert!(y1 - VisualsUi::TAB_BAR_HEIGHT >= VisualsUi::TOP_OFFSET);
+
+        ui.tabs.register_tab(
+            crate::studio::tabs::StudioTab::new("preview", "custom.preview")
+                .with_custom_title("3D Preview")
+                .with_mod_id("mod_cam"),
+        );
+        assert_eq!(ui.tabs.tabs().len(), 2);
+
+        let tab1_w = crate::studio::tabs::StudioTabSystem::tab_width(14, false);
+        let tab2_w = crate::studio::tabs::StudioTabSystem::tab_width("3D Preview".len(), true);
+        let click_x = x1 + tab1_w + 10.0;
+        let click_y = y1 - VisualsUi::TAB_BAR_HEIGHT + 10.0;
+        let handled = ui.handle_mouse_click((click_x, click_y), screen_w, screen_h, bottom_offset);
+        assert!(handled);
+        assert_eq!(ui.tabs.active_index(), 1);
+
+        ui.open = true;
+        ui.width = 300.0;
+        let [x2, y2, w2, _] = ui.comp_box_rect(screen_w, screen_h, bottom_offset);
+        assert!(w2 < w1, "composition box and tab bar resize dynamically with sidebar");
+        assert!(y2 - VisualsUi::TAB_BAR_HEIGHT >= VisualsUi::TOP_OFFSET);
+
+        let close_x = x2 + tab1_w + tab2_w - 6.0;
+        let close_y = y2 - VisualsUi::TAB_BAR_HEIGHT + 10.0;
+        let handled = ui.handle_mouse_click((close_x, close_y), screen_w, screen_h, bottom_offset);
+        assert!(handled);
+        assert_eq!(ui.tabs.tabs().len(), 1);
+        assert_eq!(ui.tabs.active_index(), 0);
     }
 }
 
