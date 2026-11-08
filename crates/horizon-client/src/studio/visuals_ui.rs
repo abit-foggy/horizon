@@ -406,17 +406,13 @@ impl VisualsUi {
         let max_comp_w = (workspace_w - pad_x * 2.0).max(10.0);
         let max_comp_h = (workspace_h - pad_y * 2.0).max(10.0);
 
-        let target_ratio = self
-            .settings
-            .aspect_ratio
-            .target_ratio()
-            .unwrap_or(16.0 / 9.0);
-        let (comp_w, comp_h) = if max_comp_w / max_comp_h > target_ratio {
+        let canvas_ratio = 16.0 / 9.0;
+        let (comp_w, comp_h) = if max_comp_w / max_comp_h > canvas_ratio {
             let h = max_comp_h;
-            ((h * target_ratio).round(), h)
+            ((h * canvas_ratio).round(), h)
         } else {
             let w = max_comp_w;
-            (w, (w / target_ratio).round())
+            (w, (w / canvas_ratio).round())
         };
 
         let comp_x = workspace_x + ((workspace_w - comp_w) * 0.5).round();
@@ -649,7 +645,30 @@ impl VisualsUi {
                 tick_color,
             );
 
-            (comp_x, comp_y, comp_w, comp_h)
+            // Aspect Ratio Matte Bars (Letterbox / Pillarbox) overlay inside composition box
+            let (active_x, active_y, active_w, active_h) = if let Some(target) = self.settings.aspect_ratio.target_ratio() {
+                let current = comp_w / comp_h;
+                let matte_color = 0xFF00_0000;
+                if current > target {
+                    let active_w = (comp_h * target).round();
+                    let bar_w = ((comp_w - active_w) * 0.5).round();
+                    style::fill(batch, atlas, [comp_x, comp_y, bar_w, comp_h], matte_color);
+                    style::fill(batch, atlas, [comp_x + comp_w - bar_w, comp_y, bar_w, comp_h], matte_color);
+                    (comp_x + bar_w, comp_y, active_w, comp_h)
+                } else if current < target {
+                    let active_h = (comp_w / target).round();
+                    let bar_h = ((comp_h - active_h) * 0.5).round();
+                    style::fill(batch, atlas, [comp_x, comp_y, comp_w, bar_h], matte_color);
+                    style::fill(batch, atlas, [comp_x, comp_y + comp_h - bar_h, comp_w, bar_h], matte_color);
+                    (comp_x, comp_y + bar_h, comp_w, active_h)
+                } else {
+                    (comp_x, comp_y, comp_w, comp_h)
+                }
+            } else {
+                (comp_x, comp_y, comp_w, comp_h)
+            };
+
+            (active_x, active_y, active_w, active_h)
         } else {
             // 1. Aspect Ratio Matte Bars (Letterbox / Pillarbox) when full screen
             if let Some(target) = self.settings.aspect_ratio.target_ratio() {
@@ -1841,6 +1860,26 @@ mod tests {
 
         ui.handle_resize_drag(100.0, 960.0);
         assert_eq!(ui.width, 480.0);
+    }
+
+    #[test]
+    fn aspect_ratio_overlay_preserves_canvas_size() {
+        let mut ui = VisualsUi::new();
+        let default_rect = ui.comp_box_rect(1920.0, 1080.0, 120.0);
+
+        ui.settings.aspect_ratio = AspectRatio::Ratio21_9;
+        assert_eq!(
+            ui.comp_box_rect(1920.0, 1080.0, 120.0),
+            default_rect,
+            "21:9 should preserve fixed 16:9 canvas size"
+        );
+
+        ui.settings.aspect_ratio = AspectRatio::Ratio4_3;
+        assert_eq!(
+            ui.comp_box_rect(1920.0, 1080.0, 120.0),
+            default_rect,
+            "4:3 should preserve fixed 16:9 canvas size"
+        );
     }
 }
 
