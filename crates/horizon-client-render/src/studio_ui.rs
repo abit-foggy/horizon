@@ -553,7 +553,7 @@ impl StudioSettingsUi {
 
     fn geometry(size: (f32, f32)) -> ([f32; 4], [f32; 4], [f32; 4]) {
         let (w, h) = size;
-        let panel_w = (w - 24.0).clamp(320.0, 560.0).min(w.max(1.0));
+        let panel_w = (w - 24.0).clamp(380.0, 560.0).min(w.max(1.0));
         let panel_x = ((w - panel_w) / 2.0).floor();
         let panel_y = 52.0_f32.min((h - 80.0).max(8.0));
         let panel_h = (h - panel_y - 36.0).max(120.0);
@@ -665,20 +665,22 @@ impl StudioSettingsUi {
             if let Some(key) = new_section {
                 if section != Some(key) {
                     section = Some(key);
-                    style::fill(
-                        batch,
-                        atlas,
-                        [viewport[0], y, viewport[2], 18.0],
-                        style::ROW_RULE,
-                    );
-                    batch.text_styled(
-                        atlas,
-                        &Text::translate(key, &[]),
-                        viewport[0] + 4.0,
-                        y + 2.0,
-                        style::SOFT,
-                        true,
-                    );
+                    if y + 18.0 >= viewport[1] && y <= viewport[1] + viewport[3] {
+                        style::fill(
+                            batch,
+                            atlas,
+                            [viewport[0], y, viewport[2], 18.0],
+                            style::ROW_RULE,
+                        );
+                        batch.text_styled(
+                            atlas,
+                            &Text::translate(key, &[]),
+                            viewport[0] + 4.0,
+                            y + 2.0,
+                            style::SOFT,
+                            true,
+                        );
+                    }
                     y += Self::SECTION_H;
                 }
             }
@@ -698,26 +700,26 @@ impl StudioSettingsUi {
                 style::fill(batch, atlas, rect, bg);
                 style::ring(batch, atlas, rect, ring_color);
 
-                let button_label = Text::translate(label, &[]);
-                let toggle_w = 44.0;
-                let toggle_h = 20.0;
-                let toggle_rect = [rect[0] + rect[2] - toggle_w - 8.0, rect[1] + 6.0, toggle_w, toggle_h];
-                let toggle_hover = ui::hovered(cursor, toggle_rect[0], toggle_rect[1], toggle_rect[2], toggle_rect[3]);
-                let on_off = Text::translate(if enabled { "options.on" } else { "options.off" }, &[]);
-                style::button(batch, atlas, toggle_rect, &on_off, (toggle_hover, true, enabled));
+                let checkbox_right = rect[0] + rect[2] - 12.0;
+                let checkbox_y = rect[1] + 11.0;
+                style::checkbox(batch, atlas, checkbox_right, checkbox_y, enabled, true);
 
+                let max_text_w = (rect[2] - 44.0).max(50.0);
+                let label_str = crate::lang::get(label);
+                let fitted_label = style::fit(atlas, &label_str, max_text_w);
                 batch.text_styled(
                     atlas,
-                    &button_label,
+                    &Text::literal(fitted_label),
                     rect[0] + 10.0,
                     rect[1] + 7.0,
                     style::WHITE,
                     true,
                 );
-                let hint = Text::translate(description, &[]);
+                let hint_str = crate::lang::get(description);
+                let fitted_hint = style::fit(atlas, &hint_str, max_text_w);
                 batch.text_styled(
                     atlas,
-                    &hint,
+                    &Text::literal(fitted_hint),
                     rect[0] + 10.0,
                     rect[1] + 24.0,
                     style::MUTED,
