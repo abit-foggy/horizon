@@ -7916,6 +7916,7 @@ impl Game<'_> {
                 &self.gui.atlas,
                 self.cursor,
                 &self.studio_freecam,
+                self.studio_visuals.settings.editor_canvas_box,
             );
             self.studio_visuals.render(
                 &mut batch,

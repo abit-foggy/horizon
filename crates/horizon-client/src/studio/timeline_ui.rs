@@ -207,6 +207,7 @@ impl TimelineUi {
         atlas: &HudAtlas,
         cursor: (f32, f32),
         freecam: &StudioFreecam,
+        composition_enabled: bool,
     ) {
         if !self.visible {
             return;
@@ -218,28 +219,45 @@ impl TimelineUi {
         let panel_y = screen_h - panel_h;
         let panel_rect = [0.0, panel_y, screen_w, panel_h];
 
-        // 1. Draw solid dark background panel with top border
-        style::fill(batch, atlas, panel_rect, 0xFF14_161D);
-        style::fill(
-            batch,
-            atlas,
-            [panel_rect[0], panel_rect[1], panel_rect[2], 1.0],
-            0xFF2D_323F,
-        );
+        if composition_enabled {
+            // 1. Draw solid dark background panel with top border (matches solid composition workspace matte)
+            style::fill(batch, atlas, panel_rect, 0xFF14_161D);
+            style::fill(
+                batch,
+                atlas,
+                [panel_rect[0], panel_rect[1], panel_rect[2], 1.0],
+                0xFF2D_323F,
+            );
 
-        // Header transport row background
-        style::fill(
-            batch,
-            atlas,
-            [panel_rect[0], panel_y, panel_rect[2], 23.0],
-            0xFF18_1B24,
-        );
-        style::fill(
-            batch,
-            atlas,
-            [panel_rect[0], panel_y + 23.0, panel_rect[2], 1.0],
-            0xFF23_2733,
-        );
+            // Header transport row background
+            style::fill(
+                batch,
+                atlas,
+                [panel_rect[0], panel_y, panel_rect[2], 23.0],
+                0xFF18_1B24,
+            );
+            style::fill(
+                batch,
+                atlas,
+                [panel_rect[0], panel_y + 23.0, panel_rect[2], 1.0],
+                0xFF23_2733,
+            );
+        } else {
+            // 1. Transparent glass background panel when composition is disabled
+            style::panel(batch, atlas, panel_rect);
+            style::fill(
+                batch,
+                atlas,
+                [panel_rect[0], panel_y, panel_rect[2], 23.0],
+                0x3300_0000,
+            );
+            style::fill(
+                batch,
+                atlas,
+                [panel_rect[0], panel_y + 23.0, panel_rect[2], 1.0],
+                0x22FF_FFFF,
+            );
+        }
 
         // 2. Transport & Action Header Bar
         let header_y = panel_y + 3.0;
