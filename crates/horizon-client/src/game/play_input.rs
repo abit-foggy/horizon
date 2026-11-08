@@ -2,21 +2,6 @@
 //! across screens, the hotbar's wheel and bumper steps, and mouse buttons while playing.
 use super::*;
 
-fn studio_replay_shortcut(key: KeyCode) -> bool {
-    matches!(
-        key,
-        KeyCode::Escape
-            | KeyCode::KeyP
-            | KeyCode::KeyF
-            | KeyCode::KeyT
-            | KeyCode::KeyM
-            | KeyCode::Home
-            | KeyCode::KeyL
-            | KeyCode::KeyK
-            | KeyCode::Delete
-    )
-}
-
 fn studio_freecam_movement_key(key: KeyCode) -> bool {
     matches!(
         key,
@@ -185,9 +170,9 @@ impl Game<'_> {
                 self.keys.release(&key, source);
                 return Ok(());
             }
-            if studio_replay_shortcut(key) {
+            if let Some(studio_key) = self.studio_key_default(raw) {
                 if !repeat {
-                    self.key_pressed(key, raw)?;
+                    self.key_pressed(studio_key, raw)?;
                 }
                 return Ok(());
             }
@@ -382,6 +367,12 @@ impl Game<'_> {
         if self.sleeping.is_some() {
             return Ok(());
         }
+        if self.screen == Screen::Playing && self.studio_replay.is_some() {
+            if pressed && let Some(studio_key) = self.studio_mouse_default(button) {
+                self.key_pressed(studio_key, studio_key)?;
+            }
+            return Ok(());
+        }
         // key.spectatorHotbar (the middle button) opens the spectator menu
         // and uses its selected item.
         if button == MouseButton::Middle && self.spectator() {
@@ -452,24 +443,11 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{studio_freecam_movement_key, studio_replay_shortcut};
+    use super::studio_freecam_movement_key;
     use winit::keyboard::KeyCode;
 
     #[test]
-    fn replay_shortcuts_are_distinct_from_freecam_movement() {
-        for key in [
-            KeyCode::Escape,
-            KeyCode::KeyP,
-            KeyCode::KeyF,
-            KeyCode::KeyT,
-            KeyCode::KeyM,
-            KeyCode::Home,
-            KeyCode::KeyL,
-            KeyCode::KeyK,
-            KeyCode::Delete,
-        ] {
-            assert!(studio_replay_shortcut(key));
-        }
+    fn replay_freecam_movement_keys_are_recognized() {
         for key in [
             KeyCode::KeyW,
             KeyCode::KeyA,
@@ -479,7 +457,6 @@ mod tests {
             KeyCode::KeyQ,
         ] {
             assert!(studio_freecam_movement_key(key));
-            assert!(!studio_replay_shortcut(key));
         }
         assert!(!studio_freecam_movement_key(KeyCode::KeyI));
     }

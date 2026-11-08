@@ -11,8 +11,9 @@ use horizon_client::{
 };
 use serde_json::{Value, json};
 use std::{
+    io::Read,
     path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 pub const HELP: &[&str] = &[
@@ -32,6 +33,34 @@ pub const HELP: &[&str] = &[
 ];
 
 impl Game<'_> {
+    /// Resolve a Studio keybind from the physical key, without changing the
+    /// meaning of that key in ordinary gameplay.
+    pub(super) fn studio_key_default(
+        &self,
+        raw: winit::keyboard::KeyCode,
+    ) -> Option<winit::keyboard::KeyCode> {
+        let name = horizon_client::keybinds::key_name(raw)?;
+        let mapping = self
+            .settings
+            .keys
+            .mappings_for(name)
+            .find(|mapping| mapping.starts_with("key.studio."))?;
+        horizon_client::keybinds::key_code(horizon_client::keybinds::KeyBinds::default_of(mapping))
+    }
+
+    pub(super) fn studio_mouse_default(
+        &self,
+        button: winit::event::MouseButton,
+    ) -> Option<winit::keyboard::KeyCode> {
+        let name = horizon_client::keybinds::mouse_name(button);
+        let mapping = self
+            .settings
+            .keys
+            .mappings_for(&name)
+            .find(|mapping| mapping.starts_with("key.studio."))?;
+        horizon_client::keybinds::key_code(horizon_client::keybinds::KeyBinds::default_of(mapping))
+    }
+
     /// In-game chat command handler: `/studio <record|replay> ...`.
     /// Returns true if the command was recognized and handled.
     pub(super) fn studio_command(&mut self, command: &str) -> bool {
@@ -579,6 +608,11 @@ impl Game<'_> {
                 self.pause_menu = true;
                 self.capture(false);
             }
+            TopBarAction::OpenStudioSettings => {
+                self.open_options_at(false, horizon_client::options_ui::Page::StudioSettings);
+                self.options_to_game = true;
+                self.capture(false);
+            }
             TopBarAction::ExitStudio => {
                 if self.studio_replay.is_some() {
                     self.close_studio_replay();
@@ -863,32 +897,79 @@ impl Game<'_> {
         if r.session.is_recording() {
             return Ok(json!({ "ok": false, "error": "recording already active" }));
         }
-        let _ = std::fs::create_dir_all("recordings");
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let filename = match name {
-            Some(n) if !n.is_empty() => format!("{}_{}.mcpr", n, ts),
-            _ => format!("recording_{}.mcpr", ts),
-        };
-        let path = PathBuf::from("recordings").join(filename);
-        let server_address = if r.session.address.is_empty() {
-            "local".to_owned()
+        let recordings = PathBuf::from("recordings");
+        std::fs::create_dir_all(&recordings)?;
+        let path = recordings.join(crate::studio::generate_recording_filename(name));
+        let is_singleplayer = r.session.address.is_empty() || r.session.address == "local";
+        // Keep server addresses and player-provided server names out of the
+        // recording metadata; the broad mode label is enough for the browser.
+        let server_name = if is_singleplayer {
+            horizon_client::lang::get("menu.singleplayer")
         } else {
-            r.session.address.clone()
+            horizon_client::lang::get("menu.multiplayer")
         };
-        let is_singleplayer = server_address == "local";
         let meta = Metadata::new(
-            server_address,
+            server_name,
             is_singleplayer,
             horizon_core::release::VERSION.into(),
         );
-        match r
-            .session
-            .start_recording_with_init(&path, meta, |recorder| {
+        let resource_packs = if self.settings.studio.include_resource_pack {
+            self.server_packs
+                .active
+                .iter()
+                .filter_map(|pack| match &pack.source {
+                    crate::packs::Source::Zip(path) => Some(path.clone()),
+                    crate::packs::Source::Dir(_) => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mods_json = self.settings.studio.include_mods_manifest.then(|| {
+            let mut required = Vec::new();
+            let mods_dir = std::env::current_dir()
+                .unwrap_or_default()
+                .join(horizon_client::mod_list::DIR);
+            for path in horizon_mods::find(&mods_dir) {
+                if let Ok(package) = horizon_mods::Package::read(&path)
+                    && self.settings.mods.enabled.contains(&package.manifest.id)
+                {
+                    required.push(json!({
+                        "id": package.manifest.id,
+                        "version": package.manifest.version,
+                    }));
+                }
+            }
+            if let Some(built_mods) = std::env::current_exe()
+                .ok()
+                .and_then(|exe| {
+                    std::fs::read_to_string(exe.with_file_name("native-mods.json")).ok()
+                })
+                .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                .and_then(|info| info["mods"].as_array().cloned())
+            {
+                for module in built_mods {
+                    if let (Some(id), Some(version)) =
+                        (module["id"].as_str(), module["version"].as_str())
+                    {
+                        required.push(json!({ "id": id, "version": version }));
+                    }
+                }
+            }
+            serde_json::to_vec(&json!({ "requiredMods": required })).unwrap_or_default()
+        });
+        match r.session.start_recording_with_options_and_init(
+            &path,
+            meta,
+            self.settings.studio.record_player_skins,
+            self.settings.studio.record_player_names,
+            mods_json,
+            resource_packs,
+            self.settings.studio.record_sounds,
+            |recorder| {
                 self.dump_world_snapshot_to_recorder(recorder);
-            }) {
+            },
+        ) {
             Ok(()) => Ok(json!({ "ok": true, "path": path.display().to_string() })),
             Err(e) => Ok(json!({ "ok": false, "error": e.to_string() })),
         }
@@ -981,6 +1062,25 @@ impl Game<'_> {
         // Apply timestamp-zero login, player pose, and chunk packets before the first rendered
         // frame so playback opens at the recorded player's viewpoint.
         let _ = self.advance_studio_replay();
+        if let Some(filename) = Path::new(path).file_name() {
+            let sidecar = horizon_client::logging::player_dir()
+                .join("studio-appearances")
+                .join(format!("{}.json", filename.to_string_lossy()));
+            if let Ok(file) = std::fs::File::open(sidecar) {
+                let mut bytes = Vec::new();
+                if file
+                    .take(16 * 1024 * 1024 + 1)
+                    .read_to_end(&mut bytes)
+                    .is_ok()
+                    && bytes.len() <= 16 * 1024 * 1024
+                    && let Ok(appearances) =
+                        serde_json::from_slice::<Vec<crate::studio::StoredAppearance>>(&bytes)
+                {
+                    self.restore_studio_appearances(&appearances);
+                    self.update_remote_skins();
+                }
+            }
+        }
         self.reset_studio_playback_ticks();
         log::info!("Studio: Opened replay '{path}' ({duration_ms} ms, {packets} packets)");
         Ok(json!({

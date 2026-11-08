@@ -88,7 +88,8 @@ impl SavedRecordingItem {
 #[derive(Clone, Debug, PartialEq)]
 pub enum StudioAction {
     None,
-    OpenReplay(PathBuf),
+    LoadAndEdit(PathBuf),
+    OpenSettings,
     OpenFolder,
     Refresh,
     Back,
@@ -126,6 +127,7 @@ impl Default for StudioUi {
 }
 
 impl StudioUi {
+    const MAX_METADATA_BYTES: u64 = 1 << 20;
     /// Create a new StudioUi for the given recordings directory.
     pub fn new(record_dir: impl Into<PathBuf>) -> Self {
         let dir = record_dir.into();
@@ -149,9 +151,15 @@ impl StudioUi {
     pub fn read_metadata(path: &Path) -> Option<RecordingMetadata> {
         let file = File::open(path).ok()?;
         let mut archive = zip::ZipArchive::new(file).ok()?;
-        let mut meta_file = archive.by_name("metaData.json").ok()?;
+        let meta_file = archive.by_name("metaData.json").ok()?;
         let mut meta_bytes = Vec::new();
-        meta_file.read_to_end(&mut meta_bytes).ok()?;
+        meta_file
+            .take(Self::MAX_METADATA_BYTES + 1)
+            .read_to_end(&mut meta_bytes)
+            .ok()?;
+        if meta_bytes.len() as u64 > Self::MAX_METADATA_BYTES {
+            return None;
+        }
         serde_json::from_slice(&meta_bytes).ok()
     }
 
@@ -237,8 +245,17 @@ impl StudioUi {
         let (w, h) = (batch.width, batch.height);
         ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
 
-        // Header Title: centered at top
-        style::title(batch, atlas, &Text::tr("horizon.pages.studio", &[]));
+        // Leave the upper-right corner clear for Studio Settings, including at
+        // small GUI widths where a centered title would collide with it.
+        ui::centered_text(
+            batch,
+            atlas,
+            &Text::tr("horizon.pages.studio", &[]),
+            0.0,
+            12.0,
+            (w - 124.0).max(1.0),
+            style::WHITE,
+        );
 
         // Subtitle strip: centered info text
         let subtitle = Text::tr("horizon.studio.saved_recordings", &[]);
@@ -384,15 +401,39 @@ impl StudioUi {
         crate::widgets::record(&label.plain(), r_btn, true);
         style::button(batch, atlas, r_btn, &label, (r_hover, true, false));
 
-        // Button 3: Open the selected recording for playback.
+        // Open the selected recording for playback.
         let e_btn = [panel_x + panel_w - 180.0, btn_y, 110.0, btn_h];
         let e_hover = ui::hovered(cursor, e_btn[0], e_btn[1], e_btn[2], e_btn[3]);
+        crate::widgets::record(
+            &Text::tr("horizon.studio.open_replay", &[]).plain(),
+            e_btn,
+            true,
+        );
         style::button(
             batch,
             atlas,
             e_btn,
             &Text::tr("horizon.studio.open_replay", &[]),
             (e_hover, true, false),
+        );
+
+        // Shared settings stay inside Studio rather than the Horizon settings hub.
+        let settings_btn = [w - 116.0, 4.0, 108.0, 22.0];
+        let settings_hover = ui::hovered(
+            cursor,
+            settings_btn[0],
+            settings_btn[1],
+            settings_btn[2],
+            settings_btn[3],
+        );
+        let label = Text::tr("horizon.studio.settings.button", &[]);
+        crate::widgets::record(&label.plain(), settings_btn, true);
+        style::button(
+            batch,
+            atlas,
+            settings_btn,
+            &label,
+            (settings_hover, true, false),
         );
 
         // Button 3: Done / Back (Right)
@@ -414,6 +455,17 @@ impl StudioUi {
         let btn_y = h - 28.0;
         let btn_h = 20.0;
 
+        let settings_btn = [w - 116.0, 4.0, 108.0, 22.0];
+        if ui::hovered(
+            cursor,
+            settings_btn[0],
+            settings_btn[1],
+            settings_btn[2],
+            settings_btn[3],
+        ) {
+            return StudioAction::OpenSettings;
+        }
+
         // Button 1: Open Folder
         let f_btn = [panel_x, btn_y, 130.0, btn_h];
         if ui::hovered(cursor, f_btn[0], f_btn[1], f_btn[2], f_btn[3]) {
@@ -427,16 +479,16 @@ impl StudioUi {
             return StudioAction::Refresh;
         }
 
-        // Button 3: Open Replay
+        // Button 3: Edit Replay
         let e_btn = [panel_x + panel_w - 180.0, btn_y, 110.0, btn_h];
         if ui::hovered(cursor, e_btn[0], e_btn[1], e_btn[2], e_btn[3]) {
             if let Some(idx) = self.selected
                 && let Some(item) = self.recordings.get(idx)
             {
-                return StudioAction::OpenReplay(item.path.clone());
+                return StudioAction::LoadAndEdit(item.path.clone());
             } else if let Some(item) = self.recordings.first() {
                 self.selected = Some(0);
-                return StudioAction::OpenReplay(item.path.clone());
+                return StudioAction::LoadAndEdit(item.path.clone());
             }
         }
 
@@ -477,6 +529,151 @@ impl StudioUi {
     }
 }
 
+/// Actions on the dedicated Studio Settings page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StudioSettingsAction {
+    None,
+    ToggleSounds,
+    ToggleSkins,
+    ToggleNames,
+    ToggleModsManifest,
+    ToggleResourcePack,
+    Back,
+}
+
+/// Renderer for recording-related Studio settings, separate from shot visuals.
+#[derive(Clone, Debug, Default)]
+pub struct StudioSettingsUi;
+
+impl StudioSettingsUi {
+    pub fn draw(
+        &self,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        cursor: (f32, f32),
+        in_world: bool,
+        settings: &crate::studio_preferences::StudioPreferences,
+    ) {
+        let (w, h) = (batch.width, batch.height);
+        ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
+        style::title(
+            batch,
+            atlas,
+            &Text::translate("horizon.studio.settings.title", &[]),
+        );
+        ui::centered_text(
+            batch,
+            atlas,
+            &Text::translate("horizon.studio.settings.description", &[]),
+            18.0,
+            34.0,
+            w - 36.0,
+            style::GREY,
+        );
+
+        let panel_w = (w - 40.0).clamp(280.0, 460.0);
+        let panel_x = ((w - panel_w) / 2.0).floor();
+        let panel_y = 62.0;
+        let panel_h = (h - 104.0).max(86.0);
+        style::panel(batch, atlas, [panel_x, panel_y, panel_w, panel_h]);
+
+        let row_x = panel_x + 12.0;
+        let row_w = panel_w - 24.0;
+        let row_h = 28.0;
+        let sounds = [row_x, panel_y + 10.0, row_w, row_h];
+        let skins = [row_x, panel_y + 42.0, row_w, row_h];
+        let names = [row_x, panel_y + 74.0, row_w, row_h];
+        let mods = [row_x, panel_y + 106.0, row_w, row_h];
+        let resource_pack = [row_x, panel_y + 138.0, row_w, row_h];
+        for (rect, key, enabled) in [
+            (
+                sounds,
+                "horizon.studio.settings.sounds",
+                settings.record_sounds,
+            ),
+            (
+                skins,
+                "horizon.studio.settings.skins",
+                settings.record_player_skins,
+            ),
+            (
+                names,
+                "horizon.studio.settings.names",
+                settings.record_player_names,
+            ),
+            (
+                mods,
+                "horizon.studio.settings.mods",
+                settings.include_mods_manifest,
+            ),
+            (
+                resource_pack,
+                "horizon.studio.settings.resource_pack",
+                settings.include_resource_pack,
+            ),
+        ] {
+            let value = Text::translate(if enabled { "options.on" } else { "options.off" }, &[]);
+            let label = Text::translate(key, &[value]);
+            let hovered = ui::hovered(cursor, rect[0], rect[1], rect[2], rect[3]);
+            ui::button(
+                batch, atlas, rect[0], rect[1], rect[2], rect[3], &label, true, hovered,
+            );
+        }
+
+        let done = [panel_x + panel_w - 84.0, h - 30.0, 84.0, 20.0];
+        let done_hover = ui::hovered(cursor, done[0], done[1], done[2], done[3]);
+        ui::action_button(
+            batch,
+            atlas,
+            crate::widgets::Action::Done,
+            done[0],
+            done[1],
+            done[2],
+            done[3],
+            &Text::translate("gui.done", &[]),
+            true,
+            done_hover,
+        );
+    }
+
+    pub fn click(&self, cursor: (f32, f32), size: (f32, f32)) -> StudioSettingsAction {
+        let (w, h) = size;
+        let panel_w = (w - 40.0).clamp(280.0, 460.0);
+        let panel_x = ((w - panel_w) / 2.0).floor();
+        let panel_y = 62.0;
+        let row_x = panel_x + 12.0;
+        let row_w = panel_w - 24.0;
+        let row_h = 28.0;
+        let sounds = [row_x, panel_y + 10.0, row_w, row_h];
+        let skins = [row_x, panel_y + 42.0, row_w, row_h];
+        let names = [row_x, panel_y + 74.0, row_w, row_h];
+        let mods = [row_x, panel_y + 106.0, row_w, row_h];
+        let resource_pack = [row_x, panel_y + 138.0, row_w, row_h];
+        let done = [panel_x + panel_w - 84.0, h - 30.0, 84.0, 20.0];
+        if ui::hovered(cursor, sounds[0], sounds[1], sounds[2], sounds[3]) {
+            StudioSettingsAction::ToggleSounds
+        } else if ui::hovered(cursor, skins[0], skins[1], skins[2], skins[3]) {
+            StudioSettingsAction::ToggleSkins
+        } else if ui::hovered(cursor, names[0], names[1], names[2], names[3]) {
+            StudioSettingsAction::ToggleNames
+        } else if ui::hovered(cursor, mods[0], mods[1], mods[2], mods[3]) {
+            StudioSettingsAction::ToggleModsManifest
+        } else if ui::hovered(
+            cursor,
+            resource_pack[0],
+            resource_pack[1],
+            resource_pack[2],
+            resource_pack[3],
+        ) {
+            StudioSettingsAction::ToggleResourcePack
+        } else if ui::hovered(cursor, done[0], done[1], done[2], done[3]) {
+            StudioSettingsAction::Back
+        } else {
+            StudioSettingsAction::None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -509,6 +706,23 @@ mod tests {
         };
         assert_eq!(short_item.formatted_duration(), "00:45");
         assert_eq!(short_item.formatted_size(), "512 KB");
+    }
+
+    #[test]
+    fn studio_settings_rows_and_done_button_have_distinct_click_targets() {
+        let ui = StudioSettingsUi;
+        let size = (800.0, 600.0);
+        for (cursor, expected) in [
+            ((300.0, 80.0), StudioSettingsAction::ToggleSounds),
+            ((300.0, 112.0), StudioSettingsAction::ToggleSkins),
+            ((300.0, 144.0), StudioSettingsAction::ToggleNames),
+            ((300.0, 176.0), StudioSettingsAction::ToggleModsManifest),
+            ((300.0, 208.0), StudioSettingsAction::ToggleResourcePack),
+            ((620.0, 580.0), StudioSettingsAction::Back),
+            ((40.0, 40.0), StudioSettingsAction::None),
+        ] {
+            assert_eq!(ui.click(cursor, size), expected);
+        }
     }
 
     #[test]
@@ -545,10 +759,9 @@ mod tests {
         assert_eq!(action, StudioAction::None);
         assert_eq!(ui.selected, Some(0));
 
-        // Click the bottom-bar Open Replay button.
-        // Panel width = 387, panel_x = 20, button x = 227..337, y = 692..712.
-        let open_replay_action = ui.click((280.0, 700.0), (427.0, 720.0));
-        assert!(matches!(open_replay_action, StudioAction::OpenReplay(_)));
+        // Click the footer's Edit Replay action.
+        let card_edit_action = ui.click((260.0, 702.0), (427.0, 720.0));
+        assert!(matches!(card_edit_action, StudioAction::LoadAndEdit(_)));
 
         // Clean up
         let _ = fs::remove_dir_all(&temp_dir);

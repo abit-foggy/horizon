@@ -186,6 +186,8 @@ pub struct McprWriter {
     writer: Option<BufWriter<File>>,
     metadata: Metadata,
     markers: Vec<Marker>,
+    mods_json: Option<Vec<u8>>,
+    resource_packs: Vec<PathBuf>,
     packet_count: usize,
     /// Bytes of whole frames in the stream: what `finish` packages.
     bytes_written: u64,
@@ -237,6 +239,8 @@ impl McprWriter {
             writer,
             metadata,
             markers: Vec::new(),
+            mods_json: None,
+            resource_packs: Vec::new(),
             packet_count: 0,
             bytes_written: 0,
             last_timestamp_ms: 0,
@@ -298,6 +302,16 @@ impl McprWriter {
     pub fn add_marker(&mut self, time_ms: u32, label: String) {
         self.markers.push(Marker { time_ms, label });
         self.markers.sort_by_key(|marker| marker.time_ms);
+    }
+
+    /// Include an optional compatibility manifest in the completed archive.
+    pub fn set_mods_json(&mut self, json: Option<Vec<u8>>) {
+        self.mods_json = json;
+    }
+
+    /// Include the active server pack under `resourcepack/` when the recording closes.
+    pub fn set_resource_packs(&mut self, paths: Vec<PathBuf>) {
+        self.resource_packs = paths;
     }
 
     pub fn packet_count(&self) -> usize {
@@ -489,6 +503,8 @@ impl McprWriter {
             &self.temp_tmcpr_path,
             self.bytes_written,
             &self.markers,
+            self.mods_json.as_deref(),
+            &self.resource_packs,
             part,
         )?;
         fs::rename(part, &self.dest_path)
@@ -503,6 +519,8 @@ fn package_stream(
     stream: &Path,
     bytes: u64,
     markers: &[Marker],
+    mods_json: Option<&[u8]>,
+    resource_packs: &[PathBuf],
     part: &Path,
 ) -> io::Result<()> {
     let mut zip = zip::ZipWriter::new(File::create_new(part)?);
@@ -541,6 +559,25 @@ fn package_stream(
     if !markers.is_empty() {
         zip.start_file("markers.json", options)?;
         serde_json::to_writer_pretty(&mut zip, markers).map_err(io::Error::other)?;
+    }
+
+    if let Some(manifest) = mods_json {
+        zip.start_file("mods.json", options)?;
+        zip.write_all(manifest)?;
+    }
+    for (index, path) in resource_packs
+        .iter()
+        .filter(|path| path.is_file())
+        .enumerate()
+    {
+        if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+            let mut input = BufReader::new(File::open(path)?);
+            let pack_options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored)
+                .large_file(true);
+            zip.start_file(format!("resourcepack/{index}-{name}"), pack_options)?;
+            io::copy(&mut input, &mut zip)?;
+        }
     }
 
     let file = zip.finish().map_err(io::Error::other)?;
@@ -1084,7 +1121,7 @@ fn recover_stream(
     metadata.duration = whole.last_timestamp_ms;
     let dest = free_name(dest);
     let part = sibling(&dest, "mcpr.part");
-    if let Err(e) = package_stream(&metadata, stream, whole.bytes, &[], &part) {
+    if let Err(e) = package_stream(&metadata, stream, whole.bytes, &[], None, &[], &part) {
         let _ = fs::remove_file(&part);
         return Err(e);
     }
@@ -1308,6 +1345,36 @@ mod tests {
 
         McprWriter::replace_camera_track(&path, &CameraTrack::default()).unwrap();
         assert!(McprReader::open(&path).unwrap().camera_track.is_none());
+    }
+
+    #[test]
+    fn optional_mods_and_resource_pack_are_added_to_the_mcpr_archive() {
+        let scratch = Scratch::new("optional_archive_entries");
+        let path = scratch.0.join("extras.mcpr");
+        let resource_pack = scratch.0.join("server-pack.zip");
+        fs::write(&resource_pack, b"pack bytes").unwrap();
+
+        let mut writer = McprWriter::new(path.clone(), Metadata::default()).unwrap();
+        writer.set_mods_json(Some(br#"{"requiredMods":[]}"#.to_vec()));
+        writer.set_resource_packs(vec![resource_pack]);
+        writer.write_packet(0, 1, &[]).unwrap();
+        writer.finish(0).unwrap();
+
+        let mut archive = zip::ZipArchive::new(File::open(path).unwrap()).unwrap();
+        let mut mods = String::new();
+        archive
+            .by_name("mods.json")
+            .unwrap()
+            .read_to_string(&mut mods)
+            .unwrap();
+        assert_eq!(mods, r#"{"requiredMods":[]}"#);
+        let mut pack = Vec::new();
+        archive
+            .by_name("resourcepack/0-server-pack.zip")
+            .unwrap()
+            .read_to_end(&mut pack)
+            .unwrap();
+        assert_eq!(pack, b"pack bytes");
     }
 
     #[test]

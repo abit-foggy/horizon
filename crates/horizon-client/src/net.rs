@@ -321,7 +321,37 @@ impl Session {
         metadata: Metadata,
         initialize: impl FnOnce(&StudioRecorder),
     ) -> std::io::Result<()> {
-        let rec = StudioRecorder::start(path.into(), metadata)?;
+        self.start_recording_with_options_and_init(
+            path,
+            metadata,
+            false,
+            false,
+            None,
+            Vec::new(),
+            true,
+            initialize,
+        )
+    }
+    pub fn start_recording_with_options_and_init(
+        &self,
+        path: impl Into<PathBuf>,
+        metadata: Metadata,
+        capture_skins: bool,
+        capture_names: bool,
+        mods_json: Option<Vec<u8>>,
+        resource_packs: Vec<PathBuf>,
+        record_sounds: bool,
+        initialize: impl FnOnce(&StudioRecorder),
+    ) -> std::io::Result<()> {
+        let rec = StudioRecorder::start_with_archive_options(
+            path.into(),
+            metadata,
+            capture_skins,
+            capture_names,
+            mods_json,
+            resource_packs,
+            record_sounds,
+        )?;
         let mut recorder = self.recorder.lock().unwrap();
         *recorder = Some(rec);
         if let Some(recorder) = recorder.as_ref() {
@@ -357,6 +387,25 @@ impl Session {
         if let Some(rec) = self.recorder.lock().unwrap().as_ref() {
             rec.record_packet(id, payload);
         }
+    }
+    pub fn record_appearance(
+        &self,
+        uuid: u128,
+        name: Option<&str>,
+        slim: bool,
+        skin_rgba: Option<&[u8]>,
+        cape_rgba: Option<&[u8]>,
+    ) {
+        if let Some(rec) = self.recorder.lock().unwrap().as_ref() {
+            rec.record_appearance(uuid, name, slim, skin_rgba, cape_rgba);
+        }
+    }
+    pub fn captures_appearances(&self) -> bool {
+        self.recorder
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(StudioRecorder::captures_appearances)
     }
     /// Record an encoded Clientbound packet into the active recording session at current elapsed time.
     pub fn record_clientbound(&self, packet: &horizon_protocol::packets::play::Clientbound) {
@@ -1001,8 +1050,9 @@ fn receive_play(
         // AddEntity with a fresh UUID.
         if let Some(rec) = recorder.lock().unwrap().as_ref()
             && rec.is_active()
+            && studio_recording_sound_allowed(&packet, rec.records_sounds())
             && let Some((recorded_id, recorded_payload)) =
-                studio_recording_packet(&packet, id, &payload)
+                studio_recording_packet(&packet, id, &payload, Some(rec))
         {
             rec.record_packet(recorded_id, &recorded_payload);
         }
@@ -1087,13 +1137,18 @@ fn studio_recording_packet<'a>(
     packet: &play::Clientbound,
     packet_id: i32,
     payload: &'a [u8],
+    recorder: Option<&StudioRecorder>,
 ) -> Option<(i32, std::borrow::Cow<'a, [u8]>)> {
     use play::Clientbound as P;
     use std::borrow::Cow;
     match packet {
         P::AddEntity(entity) => {
             let mut anonymous = entity.clone();
-            anonymous.uuid = u128::from_be_bytes(generate_secret().ok()?);
+            anonymous.uuid = if let Some(recorder) = recorder {
+                recorder.anonymous_uuid(entity.uuid)
+            } else {
+                u128::from_be_bytes(generate_secret().ok()?)
+            };
             let encoded = P::AddEntity(anonymous).encode();
             let mut reader = Reader::new(&encoded);
             let id = reader.varint().ok()?;
@@ -1122,6 +1177,16 @@ fn studio_recording_packet<'a>(
         | P::Unknown(..) => None,
         _ => Some((packet_id, Cow::Borrowed(payload))),
     }
+}
+
+fn studio_recording_sound_allowed(packet: &play::Clientbound, record_sounds: bool) -> bool {
+    record_sounds
+        || !matches!(
+            packet,
+            play::Clientbound::Sound(_)
+                | play::Clientbound::SoundEntity(_)
+                | play::Clientbound::StopSound(_)
+        )
 }
 
 /// The configuration phase: registries, tags and known packs until the
@@ -1725,11 +1790,35 @@ mod tests {
 
         for packet in packets {
             assert!(
-                studio_recording_packet(&packet, packet.id(), b"raw packet payload").is_none(),
+                studio_recording_packet(&packet, packet.id(), b"raw packet payload", None)
+                    .is_none(),
                 "{} should be excluded from recordings",
                 packet.name()
             );
         }
+    }
+
+    #[test]
+    fn studio_recording_sound_preference_filters_only_sound_packets() {
+        let sound = play::Clientbound::Sound(play::Sound {
+            sound: (1, None),
+            source: 0,
+            x: 0,
+            y: 0,
+            z: 0,
+            volume: 1.0,
+            pitch: 1.0,
+            seed: 0,
+        });
+        let swing = play::Clientbound::SwingAnimation(play::SwingAnimation {
+            id: 1,
+            hand: 0,
+            kind: 0,
+            duration: 0,
+        });
+        assert!(!studio_recording_sound_allowed(&sound, false));
+        assert!(studio_recording_sound_allowed(&sound, true));
+        assert!(studio_recording_sound_allowed(&swing, false));
     }
 
     #[test]
@@ -1746,7 +1835,7 @@ mod tests {
             data: 4,
         };
         let packet = play::Clientbound::AddEntity(original.clone());
-        let (id, payload) = studio_recording_packet(&packet, packet.id(), b"unused").unwrap();
+        let (id, payload) = studio_recording_packet(&packet, packet.id(), b"unused", None).unwrap();
         let play::Clientbound::AddEntity(recorded) =
             play::Clientbound::decode(id, &payload).unwrap()
         else {

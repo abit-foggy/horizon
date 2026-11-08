@@ -8321,6 +8321,7 @@ impl Game<'_> {
                 &self.gui.atlas,
                 self.cursor,
                 self.studio_freecam.locked_to_path,
+                &self.settings.keys,
             );
             self.studio_timeline.render(
                 &mut batch,

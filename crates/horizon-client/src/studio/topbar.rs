@@ -21,6 +21,7 @@ pub enum TopBarMenu {
 pub enum TopBarAction {
     None,
     OpenPauseMenu,
+    OpenStudioSettings,
     ExitStudio,
     OpenRecordingsFolder,
     ResetCameraToPlayer,
@@ -125,6 +126,7 @@ impl TopBarUi {
         atlas: &HudAtlas,
         cursor: (f32, f32),
         path_locked: bool,
+        keys: &horizon_client::keybinds::KeyBinds,
     ) {
         let width = batch.width;
         let layout = TopBarLayout::new(width);
@@ -251,7 +253,7 @@ impl TopBarUi {
         );
 
         if let Some(menu) = self.open_menu {
-            self.render_dropdown(batch, atlas, cursor, menu, path_locked, layout);
+            self.render_dropdown(batch, atlas, cursor, menu, path_locked, layout, keys);
         }
     }
 
@@ -263,40 +265,66 @@ impl TopBarUi {
         menu: TopBarMenu,
         path_locked: bool,
         layout: TopBarLayout,
+        keys: &horizon_client::keybinds::KeyBinds,
     ) {
-        let (index, items): (usize, Vec<(&str, &str)>) = match menu {
+        let (index, items): (usize, Vec<(&str, Option<&str>)>) = match menu {
             TopBarMenu::File => (
                 0,
                 vec![
-                    ("horizon.studio.topbar.open_recordings", ""),
-                    ("horizon.studio.topbar.game_pause_menu", "P"),
-                    ("horizon.studio.topbar.exit", "Esc"),
+                    ("horizon.studio.topbar.open_recordings", None),
+                    (
+                        "horizon.studio.topbar.game_pause_menu",
+                        Some("key.studio.pauseMenu"),
+                    ),
+                    ("horizon.studio.topbar.settings", None),
+                    ("horizon.studio.topbar.exit", Some("key.studio.exit")),
                 ],
             ),
             TopBarMenu::Camera => (
                 1,
                 vec![
-                    ("horizon.studio.topbar.toggle_freecam", "F"),
-                    ("horizon.studio.topbar.reset_to_player", "Home"),
+                    (
+                        "horizon.studio.topbar.toggle_freecam",
+                        Some("key.studio.toggleFreecam"),
+                    ),
+                    (
+                        "horizon.studio.topbar.reset_to_player",
+                        Some("key.studio.resetCamera"),
+                    ),
                     (
                         if path_locked {
                             "horizon.studio.topbar.unlock_freecam"
                         } else {
                             "horizon.studio.topbar.lock_to_spline"
                         },
-                        "L",
+                        Some("key.studio.togglePathLock"),
                     ),
-                    ("horizon.studio.topbar.add_keyframe", "K"),
-                    ("horizon.studio.topbar.add_marker", "M"),
-                    ("horizon.studio.topbar.clear_keyframes", ""),
+                    (
+                        "horizon.studio.topbar.add_keyframe",
+                        Some("key.studio.addKeyframe"),
+                    ),
+                    (
+                        "horizon.studio.topbar.add_marker",
+                        Some("key.studio.addMarker"),
+                    ),
+                    ("horizon.studio.topbar.clear_keyframes", None),
                 ],
             ),
             TopBarMenu::View => (
                 2,
                 vec![
-                    ("horizon.studio.topbar.timeline_hud", "T"),
-                    ("horizon.studio.topbar.split_scene", ""),
-                    ("horizon.studio.topbar.visuals", ""),
+                    (
+                        "horizon.studio.topbar.timeline_hud",
+                        Some("key.studio.toggleTimeline"),
+                    ),
+                    (
+                        "horizon.studio.topbar.split_scene",
+                        Some("key.studio.splitScene"),
+                    ),
+                    (
+                        "horizon.studio.topbar.visuals",
+                        Some("key.studio.toggleVisuals"),
+                    ),
                 ],
             ),
         };
@@ -344,8 +372,8 @@ impl TopBarUi {
                 if hovered { style::WHITE } else { style::MUTED },
                 true,
             );
-            if !shortcut.is_empty() {
-                let shortcut = Text::literal(*shortcut);
+            if let Some(mapping) = shortcut {
+                let shortcut = horizon_client::keybinds::display_name(keys.get(mapping));
                 let shortcut_width = atlas.font.width_text(&shortcut);
                 batch.text_styled(
                     atlas,
@@ -369,7 +397,7 @@ impl TopBarUi {
         let (cx, cy) = cursor;
         if let Some(menu) = self.open_menu {
             let (index, count) = match menu {
-                TopBarMenu::File => (0, 3),
+                TopBarMenu::File => (0, 4),
                 TopBarMenu::Camera => (1, 6),
                 TopBarMenu::View => (2, 3),
             };
@@ -383,7 +411,8 @@ impl TopBarUi {
                 return match (menu, index) {
                     (TopBarMenu::File, 0) => TopBarAction::OpenRecordingsFolder,
                     (TopBarMenu::File, 1) => TopBarAction::OpenPauseMenu,
-                    (TopBarMenu::File, 2) => TopBarAction::ExitStudio,
+                    (TopBarMenu::File, 2) => TopBarAction::OpenStudioSettings,
+                    (TopBarMenu::File, 3) => TopBarAction::ExitStudio,
                     (TopBarMenu::Camera, 0) => TopBarAction::ToggleFreecam,
                     (TopBarMenu::Camera, 1) => TopBarAction::ResetCameraToPlayer,
                     (TopBarMenu::Camera, 2) => TopBarAction::ToggleLockToPath,
@@ -442,6 +471,17 @@ mod tests {
         assert_eq!(action, TopBarAction::OpenPauseMenu);
         let action = topbar.handle_mouse_click((1280.0 - 40.0, 10.0), 1280.0, 720.0);
         assert_eq!(action, TopBarAction::ExitStudio);
+    }
+
+    #[test]
+    fn settings_action_is_available_from_the_file_menu() {
+        let mut topbar = TopBarUi::new();
+        topbar.handle_mouse_click((90.0, 10.0), 1280.0, 720.0);
+        assert_eq!(topbar.open_menu, Some(TopBarMenu::File));
+        assert_eq!(
+            topbar.handle_mouse_click((100.0, 72.0), 1280.0, 720.0),
+            TopBarAction::OpenStudioSettings
+        );
     }
 
     #[test]

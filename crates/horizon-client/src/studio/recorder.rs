@@ -5,7 +5,8 @@
 
 use super::mcpr::{McprWriter, Metadata, TimestampedPacket};
 use std::{
-    io,
+    collections::HashMap,
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -37,6 +38,16 @@ pub struct RecorderStatus {
     pub error: Option<String>,
 }
 
+/// Player appearance captured by explicit opt-in and stored beside the `.mcpr`.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct StoredAppearance {
+    pub uuid: u128,
+    pub name: Option<String>,
+    pub slim: bool,
+    pub skin_rgba: Option<Vec<u8>>,
+    pub cape_rgba: Option<Vec<u8>>,
+}
+
 /// Asynchronous packet recorder that writes `.mcpr` sessions on a worker thread.
 pub struct StudioRecorder {
     active: Arc<AtomicBool>,
@@ -47,11 +58,27 @@ pub struct StudioRecorder {
     worker: Option<JoinHandle<io::Result<PathBuf>>>,
     start_time: Instant,
     dest_path: PathBuf,
+    record_sounds: bool,
+    appearance_capture: (bool, bool),
+    anonymous_ids: std::sync::Mutex<HashMap<u128, u128>>,
+    appearances: std::sync::Mutex<HashMap<u128, StoredAppearance>>,
 }
 
 impl StudioRecorder {
     /// Start a new recording session saving to `dest_path`.
-    pub fn start(dest_path: PathBuf, mut metadata: Metadata) -> io::Result<Self> {
+    pub fn start(dest_path: PathBuf, metadata: Metadata) -> io::Result<Self> {
+        Self::start_with_archive_options(dest_path, metadata, false, false, None, Vec::new(), true)
+    }
+
+    pub fn start_with_archive_options(
+        dest_path: PathBuf,
+        mut metadata: Metadata,
+        capture_skins: bool,
+        capture_names: bool,
+        mods_json: Option<Vec<u8>>,
+        resource_packs: Vec<PathBuf>,
+        record_sounds: bool,
+    ) -> io::Result<Self> {
         let active = Arc::new(AtomicBool::new(true));
         let packet_count = Arc::new(AtomicU64::new(0));
         let bytes_written = Arc::new(AtomicU64::new(0));
@@ -66,6 +93,8 @@ impl StudioRecorder {
         let (sender, receiver): (SyncSender<RecordCommand>, Receiver<RecordCommand>) =
             sync_channel(RECORD_QUEUE_PACKETS);
         let mut writer = McprWriter::new(dest_path.clone(), metadata)?;
+        writer.set_mods_json(mods_json);
+        writer.set_resource_packs(resource_packs);
 
         let worker_active = active.clone();
         let worker_count = packet_count.clone();
@@ -128,7 +157,72 @@ impl StudioRecorder {
             worker: Some(worker),
             start_time,
             dest_path,
+            record_sounds,
+            appearance_capture: (capture_skins, capture_names),
+            anonymous_ids: std::sync::Mutex::new(HashMap::new()),
+            appearances: std::sync::Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Stable random identity within this recording, unrelated to the real profile UUID.
+    pub fn anonymous_uuid(&self, real: u128) -> u128 {
+        let mut ids = self.anonymous_ids.lock().unwrap();
+        if let Some(id) = ids.get(&real) {
+            return *id;
+        }
+        let mut bytes = [0; 16];
+        if horizon_protocol::crypto::random_bytes(&mut bytes).is_err() {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let mut seed = real.to_be_bytes().to_vec();
+            seed.extend_from_slice(&nonce.to_be_bytes());
+            bytes.copy_from_slice(&horizon_client::skins::sha1(&seed)[..16]);
+        }
+        let mut id = u128::from_be_bytes(bytes);
+        while id == real || ids.values().any(|known| *known == id) {
+            id = id.wrapping_add(1);
+        }
+        ids.insert(real, id);
+        id
+    }
+
+    pub fn record_appearance(
+        &self,
+        real: u128,
+        name: Option<&str>,
+        slim: bool,
+        skin_rgba: Option<&[u8]>,
+        cape_rgba: Option<&[u8]>,
+    ) {
+        let (capture_skins, capture_names) = self.appearance_capture;
+        if !capture_skins && !capture_names {
+            return;
+        }
+        let uuid = self.anonymous_uuid(real);
+        let mut appearances = self.appearances.lock().unwrap();
+        let name = capture_names.then_some(name).flatten();
+        let skin_rgba = capture_skins.then_some(skin_rgba).flatten();
+        let cape_rgba = capture_skins.then_some(cape_rgba).flatten();
+        if appearances.get(&uuid).is_some_and(|old| {
+            old.name.as_deref() == name
+                && old.slim == (capture_skins && slim)
+                && old.skin_rgba.as_deref() == skin_rgba
+                && old.cape_rgba.as_deref() == cape_rgba
+        }) {
+            return;
+        }
+        appearances.insert(
+            uuid,
+            StoredAppearance {
+                uuid,
+                name: name.map(str::to_owned),
+                slim: capture_skins && slim,
+                skin_rgba: skin_rgba.map(<[u8]>::to_vec),
+                cape_rgba: cape_rgba.map(<[u8]>::to_vec),
+            },
+        );
     }
 
     /// Record a clientbound packet if recording is active.
@@ -169,6 +263,14 @@ impl StudioRecorder {
         self.active.load(Ordering::Relaxed)
     }
 
+    pub fn records_sounds(&self) -> bool {
+        self.record_sounds
+    }
+
+    pub fn captures_appearances(&self) -> bool {
+        self.appearance_capture.0 || self.appearance_capture.1
+    }
+
     /// Query current recording status.
     pub fn status(&self) -> RecorderStatus {
         RecorderStatus {
@@ -185,14 +287,43 @@ impl StudioRecorder {
     pub fn stop(mut self) -> io::Result<PathBuf> {
         self.active.store(false, Ordering::SeqCst);
         let _ = self.sender.send(RecordCommand::Stop);
-        if let Some(worker) = self.worker.take() {
+        let result = if let Some(worker) = self.worker.take() {
             match worker.join() {
                 Ok(res) => res,
                 Err(_) => Err(io::Error::other("studio recorder worker thread panicked")),
             }
         } else {
             Ok(self.dest_path.clone())
+        }?;
+        let appearances = self.appearances.lock().unwrap();
+        if !appearances.is_empty() {
+            let dir = horizon_client::logging::player_dir().join("studio-appearances");
+            std::fs::create_dir_all(&dir)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+            }
+            let name = self
+                .dest_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy();
+            let path = dir.join(format!("{name}.json"));
+            let bytes = serde_json::to_vec(&appearances.values().collect::<Vec<_>>())
+                .map_err(io::Error::other)?;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&path)?;
+            file.write_all(&bytes)?;
+            file.sync_all()?;
         }
+        Ok(result)
     }
 }
 
@@ -243,6 +374,26 @@ pub fn generate_recording_filename(name: Option<&str>) -> String {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn anonymous_player_id_is_stable_for_one_recording() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "studio-anon-{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = temp_dir.join("anonymous.mcpr");
+        let recorder = StudioRecorder::start(path.clone(), Metadata::default()).unwrap();
+        let first = recorder.anonymous_uuid(123);
+        assert_ne!(first, 123);
+        assert_eq!(recorder.anonymous_uuid(123), first);
+        assert_ne!(recorder.anonymous_uuid(456), first);
+        recorder.stop().unwrap();
+        let _ = fs::remove_dir_all(temp_dir);
+    }
 
     #[test]
     fn test_studio_recorder_lifecycle() {

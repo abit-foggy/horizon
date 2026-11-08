@@ -26,6 +26,11 @@ impl Game<'_> {
                 ),
                 KeyCode::KeyT => self.studio_timeline.visible = !self.studio_timeline.visible,
                 KeyCode::KeyM => self.add_studio_marker(),
+                KeyCode::KeyV => self.handle_studio_topbar_action(
+                    horizon_client::studio::TopBarAction::ToggleVisuals,
+                ),
+                KeyCode::KeyX => self
+                    .handle_studio_topbar_action(horizon_client::studio::TopBarAction::SplitClip),
                 KeyCode::Home => self.handle_studio_topbar_action(
                     horizon_client::studio::TopBarAction::ResetCameraToPlayer,
                 ),

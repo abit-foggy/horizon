@@ -74,12 +74,22 @@ pub const MAPPINGS: &[(&str, &str, &str)] = &[
     ("key.debug.lightmapTexture", "key.keyboard.4", "debug"),
     ("key.debug.improvedTransparency", "key.keyboard.x", "debug"),
 ];
-/// Horizon's own key mappings: bound in Controls like the vanilla ones, but kept in
-/// `horizon-extras.txt` (`emoteKey`), never in `options.txt`, which stays exactly vanilla's
-/// (`MAPPINGS` is what the options parity harness compares with the pinned client).
+/// Horizon's own key mappings. Studio bindings are saved in `horizon-studio.txt`; the emote
+/// binding stays in `horizon-extras.txt`. Neither changes vanilla's `options.txt` mapping list.
 pub const HORIZON_MAPPINGS: &[(&str, &str, &str)] = &[
     // The emote wheel (docs/cosmetics.md), on a key vanilla leaves free.
     ("key.emote", "key.keyboard.b", "multiplayer"),
+    ("key.studio.exit", "key.keyboard.escape", "studio"),
+    ("key.studio.pauseMenu", "key.keyboard.p", "studio"),
+    ("key.studio.toggleFreecam", "key.keyboard.f", "studio"),
+    ("key.studio.resetCamera", "key.keyboard.home", "studio"),
+    ("key.studio.togglePathLock", "key.keyboard.l", "studio"),
+    ("key.studio.addKeyframe", "key.keyboard.k", "studio"),
+    ("key.studio.removeKeyframe", "key.keyboard.delete", "studio"),
+    ("key.studio.splitScene", "key.keyboard.x", "studio"),
+    ("key.studio.toggleVisuals", "key.keyboard.v", "studio"),
+    ("key.studio.toggleTimeline", "key.keyboard.t", "studio"),
+    ("key.studio.addMarker", "key.keyboard.m", "studio"),
 ];
 /// Every mapping the game binds: vanilla's in `Options.keyMappings` order, then Horizon's.
 pub fn all_mappings() -> impl Iterator<Item = &'static (&'static str, &'static str, &'static str)> {
@@ -90,7 +100,7 @@ pub fn is_toggle(name: &str) -> bool {
     matches!(name, "key.sneak" | "key.sprint" | "key.use" | "key.attack")
 }
 /// KeyMapping.Category sort order.
-pub const CATEGORIES: [&str; 8] = [
+pub const CATEGORIES: [&str; 9] = [
     "movement",
     "misc",
     "multiplayer",
@@ -98,6 +108,7 @@ pub const CATEGORIES: [&str; 8] = [
     "inventory",
     "creative",
     "spectator",
+    "studio",
     "debug",
 ];
 
@@ -372,6 +383,7 @@ impl KeyBinds {
     pub fn horizon_saved(&self) -> Vec<(&'static str, String)> {
         HORIZON_MAPPINGS
             .iter()
+            .filter(|(_, _, category)| *category != "studio")
             .map(|(n, _, _)| (*n, self.get(n).to_owned()))
             .collect()
     }
@@ -409,14 +421,15 @@ impl KeyBinds {
     /// would otherwise turn the key back into its old gameplay meaning.
     fn translated_mappings<'a>(&'a self, key: &'a str) -> impl Iterator<Item = &'static str> + 'a {
         all_mappings()
-            .filter(|m| m.2 != "debug")
+            .filter(|m| m.2 != "debug" && m.2 != "studio")
             .map(|m| m.0)
             .filter(move |n| self.get(n) == key)
     }
     /// Whether a mapping (other than a debug key) whose default is `key` was
     /// bound elsewhere.
     fn default_moved(&self, key: &str) -> bool {
-        all_mappings().any(|(n, d, c)| *d == key && *c != "debug" && !self.is_default(n))
+        all_mappings()
+            .any(|(n, d, c)| *d == key && *c != "debug" && *c != "studio" && !self.is_default(n))
     }
     /// Translate a physical key into the default key of the mapping it is
     /// bound to, so game code written against vanilla defaults follows the
@@ -527,6 +540,19 @@ impl KeyBinds {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn studio_bindings_are_editable_without_changing_normal_gameplay_keys() {
+        let mut keys = KeyBinds::default();
+        assert_eq!(
+            KeyBinds::default_of("key.studio.addMarker"),
+            "key.keyboard.m"
+        );
+        keys.set("key.studio.addMarker", "key.keyboard.z");
+        assert_eq!(keys.get("key.studio.addMarker"), "key.keyboard.z");
+        assert_eq!(keys.translate_all(KeyCode::KeyZ), [Ok(KeyCode::KeyZ)]);
+        assert_eq!(keys.translate_all(KeyCode::KeyM), [Ok(KeyCode::KeyM)]);
+    }
 
     #[test]
     fn mappings_sharing_the_middle_button_act_as_themselves() {

@@ -207,6 +207,8 @@ pub struct Settings {
     pub controller: crate::gamepad::PadSettings,
     /// Horizon's optional extras (`horizon-extras.txt`), all off by default.
     pub extras: crate::extras::Extras,
+    /// Per-player privacy and recording preferences for Studio.
+    pub studio: crate::studio_preferences::StudioPreferences,
     /// The Horizon mods turned on (`horizon-mods.txt`), all off by default.
     pub mods: crate::mod_list::ModList,
     /// The packs in `shaderpacks/`, listed when the Shader Packs page opens; the pick is
@@ -295,6 +297,7 @@ impl Default for Settings {
             video_modes: Vec::new(),
             controller: Default::default(),
             extras: Default::default(),
+            studio: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
             shader_options: None,
@@ -362,6 +365,10 @@ impl Settings {
             .and_then(|dir| fs::read_to_string(dir.join(crate::extras::FILE)).ok())
             .unwrap_or_default();
         let mut extras = crate::extras::Extras::parse(&extras_text);
+        let studio = path
+            .parent()
+            .map(crate::studio_preferences::StudioPreferences::load)
+            .unwrap_or_default();
         // The enabled mods are the game folder's, shared by its players (`--player-dir`).
         let mods = path
             .parent()
@@ -375,6 +382,7 @@ impl Settings {
                     horizon,
                     controller,
                     extras,
+                    studio,
                     mods,
                     ..Self::parse(&text)
                 }
@@ -383,11 +391,21 @@ impl Settings {
                 horizon,
                 controller,
                 extras,
+                studio,
                 mods,
                 ..Self::default()
             },
         };
-        // Horizon's own key bindings live in horizon-extras.txt, not in options.txt.
+        for (name, _, _) in crate::keybinds::HORIZON_MAPPINGS
+            .iter()
+            .filter(|mapping| mapping.2 == "studio")
+        {
+            if let Some(key) = settings.studio.keybinds.get(*name) {
+                settings.keys.set(name, key);
+            }
+        }
+        // Horizon's emote binding lives in horizon-extras.txt; Studio bindings
+        // are read from horizon-studio.txt above.
         let emote = settings.extras.emote_key.clone();
         settings.keys.set("key.emote", &emote);
         settings.describe_for_crashes();
@@ -498,6 +516,7 @@ impl Settings {
             video_modes: Vec::new(),
             controller: Default::default(),
             extras: Default::default(),
+            studio: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
             shader_options: None,
@@ -663,12 +682,19 @@ impl Settings {
             horizon: self.horizon.clone(),
             controller: self.controller.clone(),
             extras: self.extras.clone(),
+            studio: self.studio.clone(),
             mods: self.mods.clone(),
             video_modes: self.video_modes.clone(),
             ..Self::from_file(file)
         };
         // Horizon's own bindings aren't in options.txt.
         next.keys.set("key.emote", self.keys.get("key.emote"));
+        for (name, _, _) in crate::keybinds::HORIZON_MAPPINGS
+            .iter()
+            .filter(|mapping| mapping.2 == "studio")
+        {
+            next.keys.set(name, self.keys.get(name));
+        }
         Ok(next)
     }
     /// The `options.txt` text (Options.save).
@@ -686,6 +712,19 @@ impl Settings {
             let mut extras = self.extras.clone();
             extras.emote_key = self.keys.get("key.emote").to_owned();
             extras.save(dir);
+            let mut studio = self.studio.clone();
+            for (name, _, _) in crate::keybinds::HORIZON_MAPPINGS
+                .iter()
+                .filter(|mapping| mapping.2 == "studio")
+            {
+                studio.keybinds.remove(*name);
+                if !self.keys.is_default(name) {
+                    studio
+                        .keybinds
+                        .insert((*name).to_owned(), self.keys.get(name).to_owned());
+                }
+            }
+            studio.save(dir);
             self.mods.save(&crate::logging::shared_dir(dir));
         }
     }
@@ -1030,6 +1069,33 @@ mod tests {
             "key.keyboard.b"
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn studio_bindings_are_saved_with_studio_preferences_not_options_txt() {
+        let dir = scratch("studio-keybinds");
+        let options = dir.join("options.txt");
+        let mut settings = Settings::default();
+        settings.keys.set("key.studio.addMarker", "key.keyboard.z");
+        settings.save(&options);
+
+        let options_text = fs::read_to_string(&options).unwrap();
+        assert!(!options_text.contains("key.studio"));
+        let studio_text = fs::read_to_string(dir.join(crate::studio_preferences::FILE)).unwrap();
+        assert!(studio_text.contains("key.studio.addMarker:key.keyboard.z"));
+        assert_eq!(
+            Settings::load(&options).keys.get("key.studio.addMarker"),
+            "key.keyboard.z"
+        );
+        assert_eq!(
+            Settings::load(&options)
+                .with_option("fov", "90")
+                .unwrap()
+                .keys
+                .get("key.studio.addMarker"),
+            "key.keyboard.z"
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

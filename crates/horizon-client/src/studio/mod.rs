@@ -17,7 +17,7 @@ pub use mcpr::{
     McprReader, McprWriter, Metadata, RecoveryReport, TimestampedPacket, recover_crashed_recordings,
 };
 pub use path_render::render_camera_path;
-pub use recorder::{RecorderStatus, StudioRecorder, generate_recording_filename};
+pub use recorder::{RecorderStatus, StoredAppearance, StudioRecorder, generate_recording_filename};
 pub use replay::ReplayDriver;
 pub use spline::{CameraKeyframe, CameraTrack, EvaluatedPose};
 pub use timeline_ui::{TimelineAction, TimelineUi};

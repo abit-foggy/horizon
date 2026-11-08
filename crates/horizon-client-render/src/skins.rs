@@ -917,6 +917,20 @@ impl Downloader {
     pub fn remember_image(&mut self, location: &str, rgba: &[u8]) {
         self.remember(location.to_owned(), rgba.to_vec());
     }
+    /// Seed a replay texture from the local Studio appearance sidecar without
+    /// looking up its URL or making a network request.
+    pub fn remember_studio_texture(&mut self, kind: Kind, rgba: &[u8]) -> String {
+        let digest = sha1(rgba);
+        let hash: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        let location = match kind {
+            Kind::Skin => skin_location(&hash),
+            Kind::Cape => cape_location(&hash),
+            Kind::Elytra => format!("elytra/{hash}"),
+        };
+        self.states.insert((kind, hash.clone()), Download::Ready);
+        self.queue(location, rgba.to_vec());
+        format!("https://textures.minecraft.net/texture/{hash}")
+    }
     pub fn new(root: std::path::PathBuf) -> Self {
         let (send, done) = std::sync::mpsc::channel();
         Self {
