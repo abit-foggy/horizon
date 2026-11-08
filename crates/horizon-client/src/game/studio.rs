@@ -33,6 +33,29 @@ pub const HELP: &[&str] = &[
 ];
 
 impl Game<'_> {
+    fn studio_editor_preferences_path() -> PathBuf {
+        Self::options_path().with_file_name(horizon_client::studio::editor_preferences::FILE)
+    }
+
+    pub(super) fn load_studio_editor_preferences(&mut self) {
+        let preferences = horizon_client::studio::editor_preferences::EditorPreferences::load(
+            &Self::studio_editor_preferences_path(),
+        );
+        self.studio_timeline.visible = preferences.timeline_visible;
+        self.studio_visuals.open = preferences.visuals_open;
+        self.studio_visuals.settings = preferences.visuals.clone();
+        self.studio_visuals.global_settings = preferences.visuals;
+    }
+
+    pub(super) fn save_studio_editor_preferences(&mut self) {
+        let preferences = horizon_client::studio::editor_preferences::EditorPreferences {
+            timeline_visible: self.studio_timeline.visible,
+            visuals_open: self.studio_visuals.open,
+            visuals: self.studio_visuals.settings.clone(),
+        };
+        preferences.save(&Self::studio_editor_preferences_path());
+    }
+
     /// Resolve a Studio keybind from the physical key, without changing the
     /// meaning of that key in ordinary gameplay.
     pub(super) fn studio_key_default(
@@ -675,9 +698,11 @@ impl Game<'_> {
             }
             TopBarAction::ToggleTimeline => {
                 self.studio_timeline.visible = !self.studio_timeline.visible;
+                self.save_studio_editor_preferences();
             }
             TopBarAction::ToggleVisuals => {
                 self.studio_visuals.open = !self.studio_visuals.open;
+                self.save_studio_editor_preferences();
             }
             TopBarAction::SplitClip => {
                 self.studio_timeline
@@ -1043,6 +1068,8 @@ impl Game<'_> {
 
         let duration_ms = driver.duration_ms();
         let packets = driver.packet_count();
+        self.save_studio_editor_preferences();
+        self.studio_visuals.begin_replay_session();
         self.studio_timeline.duration_ms = u64::from(duration_ms);
         self.studio_timeline.current_time_ms = 0;
         self.studio_timeline.playing = !driver.is_paused();

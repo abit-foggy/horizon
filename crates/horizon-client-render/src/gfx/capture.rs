@@ -488,6 +488,7 @@ impl Scene {
     pub fn frame<'a>(&'a self, hud: &'a HudBatch) -> Frame<'a> {
         let f = &self.frame;
         Frame {
+            comp_box: None,
             weather: &[],
             hand_items: &[],
             weather_time: crate::weather::Time::new(0, 0.0),

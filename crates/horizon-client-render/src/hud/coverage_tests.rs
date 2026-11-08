@@ -108,6 +108,7 @@ impl Gpu {
             [4, 2],
             0..batch.vertices.len() as u32,
             None,
+            None,
         );
         let buffers = [&frame, &mask].map(|t| {
             let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {

@@ -24,7 +24,10 @@ impl Game<'_> {
                 KeyCode::KeyF => self.handle_studio_timeline_action(
                     horizon_client::studio::TimelineAction::ToggleFreecam,
                 ),
-                KeyCode::KeyT => self.studio_timeline.visible = !self.studio_timeline.visible,
+                KeyCode::KeyT => {
+                    self.studio_timeline.visible = !self.studio_timeline.visible;
+                    self.save_studio_editor_preferences();
+                }
                 KeyCode::KeyM => self.add_studio_marker(),
                 KeyCode::KeyV => self.handle_studio_topbar_action(
                     horizon_client::studio::TopBarAction::ToggleVisuals,

@@ -189,6 +189,11 @@ impl Game<'_> {
     /// The day time the frame draws (sky, sun, moon, the sky's light): PvP & HUD's time of day,
     /// else the world's. The world's own `day_time` and everything that plays by it stay.
     pub(super) fn view_day_time(&self) -> i64 {
+        if self.studio_replay.is_some() && self.studio_visuals.settings.override_time {
+            let day = self.world.day_time.div_euclid(24000);
+            let time = self.studio_visuals.settings.time_of_day.round() as i64;
+            return day * 24000 + time.rem_euclid(24000);
+        }
         let fixed = self.settings.extras.pvp.tweaks.time;
         horizon_client::pvp::view_day_time(self.world.day_time, fixed.filter(|_| self.own_view()))
     }

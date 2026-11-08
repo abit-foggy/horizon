@@ -8,6 +8,7 @@
 //! scrolling, scrollbar thumb, and multi-option presets.
 
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 use horizon_client_render::{
     graphics_style as style,
@@ -17,7 +18,8 @@ use horizon_client_render::{
 };
 
 /// Framing aspect ratio modes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AspectRatio {
     None,
     Ratio16_9,
@@ -59,13 +61,11 @@ impl AspectRatio {
 }
 
 /// Settings and toggles stored in the visuals sidebar.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct VisualsSettings {
     // GUI section
     pub gui_action_bar: bool,
-    pub gui_player_hotbar: bool,
-    pub gui_player_vitals: bool,
-    pub gui_player_inventory: bool,
 
     // World section
     pub world_blocks: bool,
@@ -101,9 +101,6 @@ impl Default for VisualsSettings {
     fn default() -> Self {
         Self {
             gui_action_bar: true,
-            gui_player_hotbar: false,
-            gui_player_vitals: false,
-            gui_player_inventory: false,
 
             world_blocks: true,
             world_entities: true,
@@ -285,6 +282,17 @@ impl VisualsUi {
         Self::default()
     }
 
+    /// Start each replay from the last-used visual settings while discarding
+    /// scene overrides belonging to the previously opened recording.
+    pub fn begin_replay_session(&mut self) {
+        let defaults = self.settings.clone();
+        self.global_settings = defaults.clone();
+        self.settings = defaults;
+        self.scene_settings.clear();
+        self.active_scene = 0;
+        self.scope = SettingsScope::Global;
+    }
+
     /// Set scope (Global or Per-Scene). Automatically persists and switches settings.
     pub fn set_scope(&mut self, scope: SettingsScope) {
         if self.scope == scope {
@@ -404,6 +412,36 @@ impl VisualsUi {
         let comp_y = workspace_y + ((workspace_h - comp_h) * 0.5).round();
 
         [comp_x, comp_y, comp_w, comp_h]
+    }
+
+    /// Composition viewport in render-target pixels. Studio UI geometry uses `gui_size`,
+    /// while the renderer may target a differently scaled framebuffer.
+    pub fn comp_box_viewport(
+        &self,
+        gui_size: [f32; 2],
+        framebuffer_size: [u32; 2],
+        bottom_offset: f32,
+    ) -> Option<[u32; 4]> {
+        if !self.settings.editor_canvas_box
+            || gui_size[0] <= 0.0
+            || gui_size[1] <= 0.0
+            || framebuffer_size[0] == 0
+            || framebuffer_size[1] == 0
+        {
+            return None;
+        }
+        let [x, y, width, height] = self.comp_box_rect(gui_size[0], gui_size[1], bottom_offset);
+        let scale_x = framebuffer_size[0] as f32 / gui_size[0];
+        let scale_y = framebuffer_size[1] as f32 / gui_size[1];
+        let left = (x * scale_x).round().clamp(0.0, framebuffer_size[0] as f32) as u32;
+        let top = (y * scale_y).round().clamp(0.0, framebuffer_size[1] as f32) as u32;
+        let right = ((x + width) * scale_x)
+            .round()
+            .clamp(left as f32, framebuffer_size[0] as f32) as u32;
+        let bottom = ((y + height) * scale_y)
+            .round()
+            .clamp(top as f32, framebuffer_size[1] as f32) as u32;
+        Some([left, top, right.saturating_sub(left).max(1), bottom.saturating_sub(top).max(1)])
     }
 
     /// Render framing guides (Rule of Thirds, Center Guide, Aspect Ratio matte bars, AE Composition Box).
@@ -781,42 +819,6 @@ impl VisualsUi {
             cursor,
             "horizon.studio.visuals.gui.action_bar",
             self.settings.gui_action_bar,
-        );
-        self.render_row_toggle(
-            batch,
-            atlas,
-            panel_x,
-            right,
-            content_top,
-            content_bottom,
-            &mut row_y,
-            cursor,
-            "horizon.studio.visuals.gui.recorded_hotbar",
-            self.settings.gui_player_hotbar,
-        );
-        self.render_row_toggle(
-            batch,
-            atlas,
-            panel_x,
-            right,
-            content_top,
-            content_bottom,
-            &mut row_y,
-            cursor,
-            "horizon.studio.visuals.gui.health_hunger",
-            self.settings.gui_player_vitals,
-        );
-        self.render_row_toggle(
-            batch,
-            atlas,
-            panel_x,
-            right,
-            content_top,
-            content_bottom,
-            &mut row_y,
-            cursor,
-            "horizon.studio.visuals.gui.inventory_menus",
-            self.settings.gui_player_inventory,
         );
 
         // Group 3: World
@@ -1305,43 +1307,6 @@ impl VisualsUi {
             self.settings.gui_action_bar = !self.settings.gui_action_bar;
             return true;
         }
-        if Self::check_toggle(
-            cursor,
-            panel_x,
-            self.width,
-            content_top,
-            content_bottom,
-            self.scroll_y,
-            &mut row_y,
-        ) {
-            self.settings.gui_player_hotbar = !self.settings.gui_player_hotbar;
-            return true;
-        }
-        if Self::check_toggle(
-            cursor,
-            panel_x,
-            self.width,
-            content_top,
-            content_bottom,
-            self.scroll_y,
-            &mut row_y,
-        ) {
-            self.settings.gui_player_vitals = !self.settings.gui_player_vitals;
-            return true;
-        }
-        if Self::check_toggle(
-            cursor,
-            panel_x,
-            self.width,
-            content_top,
-            content_bottom,
-            self.scroll_y,
-            &mut row_y,
-        ) {
-            self.settings.gui_player_inventory = !self.settings.gui_player_inventory;
-            return true;
-        }
-
         // Group 3: World
         row_y += 16.0;
         if Self::check_toggle(
@@ -1804,5 +1769,25 @@ mod tests {
             "comp box must not overlap the visuals panel"
         );
         assert!(y2 >= 24.0);
+    }
+
+    #[test]
+    fn composition_viewport_tracks_framebuffer_scale_and_toggle() {
+        let mut ui = VisualsUi::new();
+        assert_eq!(ui.comp_box_viewport([960.0, 540.0], [1920, 1080], 60.0), None);
+
+        ui.settings.editor_canvas_box = true;
+        let viewport = ui
+            .comp_box_viewport([960.0, 540.0], [1920, 1080], 60.0)
+            .expect("composition viewport is enabled");
+        let [x, y, width, height] = ui.comp_box_rect(960.0, 540.0, 60.0);
+        assert_eq!(viewport, [
+            (x * 2.0).round() as u32,
+            (y * 2.0).round() as u32,
+            (width * 2.0).round() as u32,
+            (height * 2.0).round() as u32,
+        ]);
+        assert!(viewport[0] + viewport[2] <= 1920);
+        assert!(viewport[1] + viewport[3] <= 1080);
     }
 }

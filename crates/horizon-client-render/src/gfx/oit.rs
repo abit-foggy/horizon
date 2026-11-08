@@ -621,6 +621,7 @@ impl Oit {
         draw: &dyn Fn(&mut wgpu::RenderPass<'_>, Stage),
         extras: &Extras<'_>,
         mut timing: Option<&mut super::pack_timing::PassTiming>,
+        comp_box: Option<[u32; 4]>,
     ) {
         let Some(t) = &self.targets else { return };
         let attachment = |view, load| {
@@ -646,7 +647,15 @@ impl Oit {
         let water_mask = extras.water_mask.zip(t.terrain_depth.as_ref());
         let cloud_depth = extras.clouds.zip(t.cloud_depth.as_ref());
         if let Some((mask, _)) = water_mask {
-            self.execute_water_mask(encoder, t, color, depth, mask, timing.as_deref_mut());
+            self.execute_water_mask(
+                encoder,
+                t,
+                color,
+                depth,
+                mask,
+                timing.as_deref_mut(),
+                comp_box,
+            );
         }
         let terrain_depth = water_mask.map_or(depth, |(_, d)| &d.view);
         let [c0, c1] = &t.views.coefficients;
@@ -686,6 +695,7 @@ impl Oit {
                     depth_stencil_attachment: read_only(terrain_depth),
                     ..Default::default()
                 });
+                super::apply_comp_box(&mut pass, comp_box, t.size);
                 pass.set_bind_group(GROUP, group, &[]);
                 draw(&mut pass, stage);
             }
@@ -709,11 +719,18 @@ impl Oit {
                     depth_stencil_attachment: read_only(depth),
                     ..Default::default()
                 });
+                super::apply_comp_box(&mut pass, comp_box, t.size);
                 pass.set_bind_group(GROUP, group, &[]);
                 features(&mut pass, stage);
             }
             if stage == Stage::DepthBounds {
-                self.execute_depth_bounds_cull(encoder, t, depth, timing.as_deref_mut());
+                self.execute_depth_bounds_cull(
+                    encoder,
+                    t,
+                    depth,
+                    timing.as_deref_mut(),
+                    comp_box,
+                );
             }
             if let Some((clouds, cloud_depth)) = cloud_depth {
                 self.render_clouds(
@@ -724,12 +741,21 @@ impl Oit {
                     (label, group, &then),
                     (clouds, cloud_depth),
                     timing.as_deref_mut(),
+                    comp_box,
                 );
             }
             if stage == Stage::DepthBounds
                 && let Some((mask, _)) = water_mask
             {
-                self.execute_water_mask(encoder, t, color, depth, mask, timing.as_deref_mut());
+                self.execute_water_mask(
+                    encoder,
+                    t,
+                    color,
+                    depth,
+                    mask,
+                    timing.as_deref_mut(),
+                    comp_box,
+                );
             }
         }
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -746,6 +772,7 @@ impl Oit {
             }),
             ..Default::default()
         });
+        super::apply_comp_box(&mut pass, comp_box, t.size);
         pass.set_pipeline(&self.composite);
         pass.set_bind_group(GROUP, &t.composite, &[]);
         pass.draw(0..3, 0..1);
@@ -771,6 +798,7 @@ impl Oit {
             &Depth,
         ),
         timing: Option<&mut super::pack_timing::PassTiming>,
+        comp_box: Option<[u32; 4]>,
     ) {
         if stage == Stage::DepthBounds {
             encoder.copy_texture_to_texture(
@@ -793,12 +821,14 @@ impl Oit {
             }),
             ..Default::default()
         });
+        super::apply_comp_box(&mut pass, comp_box, t.size);
         pass.set_bind_group(GROUP, group, &[]);
         draw(&mut pass, &self.clouds[stage as usize]);
     }
 
     /// `LevelRenderer.executeOitWaterMask`: the terrain's depth is the world's
     /// again, with the boats' water patches on top.
+    #[allow(clippy::too_many_arguments)]
     fn execute_water_mask(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -807,6 +837,7 @@ impl Oit {
         depth: &wgpu::TextureView,
         mask: &dyn Fn(&mut wgpu::RenderPass<'_>),
         timing: Option<&mut super::pack_timing::PassTiming>,
+        comp_box: Option<[u32; 4]>,
     ) {
         let Some(terrain) = &t.terrain_depth else {
             return;
@@ -839,6 +870,7 @@ impl Oit {
             }),
             ..Default::default()
         });
+        super::apply_comp_box(&mut pass, comp_box, t.size);
         mask(&mut pass);
     }
 
@@ -851,6 +883,7 @@ impl Oit {
         t: &Targets,
         depth: &wgpu::TextureView,
         timing: Option<&mut super::pack_timing::PassTiming>,
+        comp_box: Option<[u32; 4]>,
     ) {
         encoder.copy_texture_to_texture(
             t.bounds.as_image_copy(),
@@ -883,6 +916,7 @@ impl Oit {
             }),
             ..Default::default()
         });
+        super::apply_comp_box(&mut pass, comp_box, t.size);
         pass.set_pipeline(&self.cull);
         pass.set_bind_group(GROUP, &t.cull, &[]);
         pass.draw(0..3, 0..1);

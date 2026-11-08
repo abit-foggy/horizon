@@ -215,20 +215,31 @@ impl Game<'_> {
             )),
         };
         let tilt = self.settings.file.double("damageTiltStrength");
-        let mut matrix =
+        let matrix =
             glam::Mat4::from_cols_array(&bob_matrix(&state, tilt, self.settings.view_bobbing).m)
                 * self.native_shake_matrix(partial);
-        if self.studio_replay.is_some()
-            && self.studio_visuals.settings.override_shake
-            && self.studio_visuals.settings.shake_intensity > 0.0
-        {
-            let intensity = self.studio_visuals.settings.shake_intensity;
+        matrix
+    }
+
+    /// Camera effects selected in Studio, applied even when freecam suppresses
+    /// the player's ordinary hurt bob and view bob.
+    pub(super) fn studio_camera_effects_matrix(&self, partial: f32) -> glam::Mat4 {
+        if self.studio_replay.is_none() {
+            return glam::Mat4::IDENTITY;
+        }
+        let settings = &self.studio_visuals.settings;
+        let mut matrix = glam::Mat4::IDENTITY;
+        if settings.override_shake && settings.shake_intensity > 0.0 {
+            let intensity = settings.shake_intensity.clamp(0.0, 1.0);
             let time = (self.ticks as f32 + partial) * 0.25;
             matrix *= glam::Mat4::from_translation(glam::vec3(
                 (time * 12.0).sin() * 0.03 * intensity,
                 (time * 17.0).cos() * 0.03 * intensity,
                 0.0,
             )) * glam::Mat4::from_rotation_z((time * 9.0).sin() * 0.02 * intensity);
+        }
+        if settings.override_roll {
+            matrix *= glam::Mat4::from_rotation_z(settings.camera_roll.to_radians());
         }
         matrix
     }

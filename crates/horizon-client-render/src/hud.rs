@@ -1704,6 +1704,8 @@ pub struct HudBatch {
     pub game_time: f32,
     /// Screen's first vertex: the preceding HUD is part of its blurred background.
     pub blur_at: u32,
+    /// First vertex of Studio editor chrome, drawn outside the composition viewport.
+    pub studio_editor_at: Option<u32>,
     /// Player object profiles encountered while painting text this frame.
     pub inline_profiles: Vec<serde_json::Value>,
 }
@@ -1762,6 +1764,7 @@ impl HudBatch {
             glint_colour: 0,
             game_time: 0.0,
             blur_at: 0,
+            studio_editor_at: None,
             inline_profiles: Vec::new(),
         }
     }
@@ -2956,6 +2959,7 @@ impl HudRenderer {
             size,
             0..batch.vertices.len() as u32,
             None,
+            None,
         );
     }
     /// Draw part of the prepared batch, preserving its blend/depth runs.
@@ -2970,6 +2974,7 @@ impl HudRenderer {
         size: [u32; 2],
         vertices: std::ops::Range<u32>,
         mut timing: Option<&mut crate::gfx::pack_timing::PassTiming>,
+        viewport: Option<[u32; 4]>,
     ) {
         if vertices.is_empty() || size.contains(&0) {
             return;
@@ -3015,10 +3020,24 @@ impl HudRenderer {
                 }),
                 ..Default::default()
             });
+            if let Some([x, y, w, h]) = viewport {
+                pass.set_viewport(x as f32, y as f32, w as f32, h as f32, 0.0, 1.0);
+                pass.set_scissor_rect(x, y, w, h);
+            }
             pass.set_bind_group(0, &self.group, &[]);
             pass.set_vertex_buffer(0, self.buffer.slice(..));
             if let Some(clip) = clip {
                 let [x, y, w, h] = clip.map(|v| (v as f32 * self.zoom) as u32);
+                let [x, y, w, h] = if let Some([vx, vy, vw, vh]) = viewport {
+                    [
+                        vx + ((x as u64 * vw as u64) / size[0] as u64) as u32,
+                        vy + ((y as u64 * vh as u64) / size[1] as u64) as u32,
+                        ((w as u64 * vw as u64) / size[0] as u64) as u32,
+                        ((h as u64 * vh as u64) / size[1] as u64) as u32,
+                    ]
+                } else {
+                    [x, y, w, h]
+                };
                 let (x, y) = (x.min(size[0]), y.min(size[1]));
                 let (w, h) = (w.min(size[0] - x), h.min(size[1] - y));
                 if w == 0 || h == 0 {
@@ -4632,6 +4651,7 @@ texture=wide",
                 glint_colour: 0,
                 game_time: 0.0,
                 blur_at: 0,
+                studio_editor_at: None,
                 inline_profiles: Vec::new(),
             };
             for (image_width, image_height) in [(195, 136), (176, 166), (176, 222)] {

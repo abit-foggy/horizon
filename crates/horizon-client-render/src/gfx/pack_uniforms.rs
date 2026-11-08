@@ -2499,6 +2499,7 @@ pub(super) mod initial_history_tests {
 
     pub(in crate::gfx) fn frame(hud: &HudBatch) -> Frame<'_> {
         Frame {
+            comp_box: None,
             eye: glam::DVec3::ZERO,
             eye_rotation: [0.0; 2],
             first_person: true,

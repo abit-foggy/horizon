@@ -250,12 +250,14 @@ fn surface_pass<'e>(
     surface: &wgpu::TextureView,
     depth: &wgpu::TextureView,
     clear: bool,
+    comp_box: Option<[u32; 4]>,
+    config_size: [u32; 2],
 ) -> wgpu::RenderPass<'e> {
     let keep = |load| wgpu::Operations {
         load,
         store: wgpu::StoreOp::Store,
     };
-    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("Horizon world, pack terrain"),
         color_attachments: &[
             Some(wgpu::RenderPassColorAttachment {
@@ -284,8 +286,11 @@ fn surface_pass<'e>(
             stencil_ops: None,
         }),
         ..Default::default()
-    })
+    });
+    apply_comp_box(&mut pass, comp_box, config_size);
+    pass
 }
+#[allow(clippy::too_many_arguments)]
 fn world_pass_after_culling<'e>(
     encoder: &'e mut wgpu::CommandEncoder,
     view: &wgpu::TextureView,
@@ -293,8 +298,10 @@ fn world_pass_after_culling<'e>(
     keep_depth: bool,
     timing: Option<&mut pack_timing::PassTiming>,
     name: &str,
+    comp_box: Option<[u32; 4]>,
+    config_size: [u32; 2],
 ) -> wgpu::RenderPass<'e> {
-    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("Horizon world, after culling"),
         timestamp_writes: timing.and_then(|t| t.writes(name)),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -320,7 +327,61 @@ fn world_pass_after_culling<'e>(
             stencil_ops: None,
         }),
         ..Default::default()
-    })
+    });
+    apply_comp_box(&mut pass, comp_box, config_size);
+    pass
+}
+
+pub(super) fn apply_comp_box(
+    pass: &mut wgpu::RenderPass<'_>,
+    comp_box: Option<[u32; 4]>,
+    size: [u32; 2],
+) {
+    if let Some([x, y, width, height]) = comp_box {
+        let x = x.min(size[0].saturating_sub(1));
+        let y = y.min(size[1].saturating_sub(1));
+        let width = width.min(size[0].saturating_sub(x)).max(1);
+        let height = height.min(size[1].saturating_sub(y)).max(1);
+        pass.set_viewport(x as f32, y as f32, width as f32, height as f32, 0.0, 1.0);
+        pass.set_scissor_rect(x, y, width, height);
+    }
+}
+
+fn scale_comp_box(
+    comp_box: Option<[u32; 4]>,
+    source_size: [u32; 2],
+    target_size: [u32; 2],
+) -> Option<[u32; 4]> {
+    let [x, y, width, height] = comp_box?;
+    if source_size.contains(&0) || target_size.contains(&0) {
+        return None;
+    }
+    let scale_x = target_size[0] as f64 / source_size[0] as f64;
+    let scale_y = target_size[1] as f64 / source_size[1] as f64;
+    let left = (x as f64 * scale_x).round() as u32;
+    let top = (y as f64 * scale_y).round() as u32;
+    let right = (x.saturating_add(width) as f64 * scale_x).round() as u32;
+    let bottom = (y.saturating_add(height) as f64 * scale_y).round() as u32;
+    Some([
+        left.min(target_size[0] - 1),
+        top.min(target_size[1] - 1),
+        right.min(target_size[0]).saturating_sub(left).max(1),
+        bottom.min(target_size[1]).saturating_sub(top).max(1),
+    ])
+}
+
+#[cfg(test)]
+mod composition_tests {
+    use super::scale_comp_box;
+
+    #[test]
+    fn composition_box_scales_to_internal_render_target() {
+        assert_eq!(
+            scale_comp_box(Some([200, 100, 800, 450]), [1920, 1080], [960, 540]),
+            Some([100, 50, 400, 225])
+        );
+        assert_eq!(scale_comp_box(None, [1920, 1080], [960, 540]), None);
+    }
 }
 /// The point a `shaders/` pack's terrain is drawn relative to: the camera with the fraction of
 /// each coordinate rounded to the nearest 1/65536 block. Read back with a probe pack of ours,
@@ -905,6 +966,8 @@ impl ShrinkGate {
     }
 }
 pub struct Frame<'a> {
+    /// Framebuffer rectangle for Studio composition; the HUD remains full-frame.
+    pub comp_box: Option<[u32; 4]>,
     pub camera: DVec3,
     pub yaw: f32,
     pub pitch: f32,
@@ -7597,6 +7660,7 @@ impl Renderer {
             frame.yaw,
             frame.pitch,
             frame.depth_far,
+            frame.comp_box,
         ))
     }
     /// The view frustum `render` will cull with, for culling geometry built
@@ -7608,8 +7672,9 @@ impl Renderer {
         pitch: f32,
         bob: Mat4,
         depth_far: f32,
+        comp_box: Option<[u32; 4]>,
     ) -> Frustum {
-        let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));
+        let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far, comp_box));
         Frustum {
             planes: frustum(views.cull().view_proj(bob)),
         }
@@ -7624,16 +7689,27 @@ impl Renderer {
         pitch: f32,
         bob: Mat4,
         depth_far: f32,
+        comp_box: Option<[u32; 4]>,
     ) -> Frustum {
-        let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));
+        let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far, comp_box));
         taa_frustum(
             views.cull().view_proj(bob),
             self.world_post
                 .taa_render_size([self.config.width, self.config.height]),
         )
     }
-    fn screen_view(&self, fov_degrees: f32, yaw: f32, pitch: f32, far: f32) -> View {
-        let aspect = self.config.width as f32 / self.config.height.max(1) as f32;
+    fn screen_view(
+        &self,
+        fov_degrees: f32,
+        yaw: f32,
+        pitch: f32,
+        far: f32,
+        comp_box: Option<[u32; 4]>,
+    ) -> View {
+        let aspect = match comp_box {
+            Some([_, _, width, height]) if height > 0 => width as f32 / height as f32,
+            _ => self.config.width as f32 / self.config.height.max(1) as f32,
+        };
         View::screen(yaw, pitch, fov_degrees, aspect, far)
     }
     fn update_lightmap(
@@ -9834,6 +9910,16 @@ impl Renderer {
             Some((color, depth)) => (color, depth),
             None => (&view_target, &self.depth),
         };
+        let world_target_size = self
+            .world_post
+            .size()
+            .filter(|_| scaled.is_some())
+            .unwrap_or([self.config.width, self.config.height]);
+        let world_comp_box = scale_comp_box(
+            frame.comp_box,
+            [self.config.width, self.config.height],
+            world_target_size,
+        );
         if culling && let Some(cull) = &mut self.cull {
             cull.bind_depth(&self.device, world_depth);
         }
@@ -10058,6 +10144,11 @@ impl Renderer {
                 timestamp_writes: native.timing.as_mut().and_then(|t| t.writes(&sky.label)),
                 ..Default::default()
             });
+            apply_comp_box(
+                &mut pass,
+                world_comp_box,
+                world_target_size,
+            );
             pass.set_bind_group(0, &self.group, &[]);
             sky.draw(&mut pass, &native.frame);
         }
@@ -10291,6 +10382,11 @@ impl Renderer {
                 }),
                 ..Default::default()
             });
+            apply_comp_box(
+                &mut pass,
+                world_comp_box,
+                world_target_size,
+            );
             pass.set_bind_group(0, &self.group, &[]);
             pack_frame(&mut pass);
             if frame.title || (sky_visible && (frame.skybox || frame.end_sky)) {
@@ -10376,17 +10472,33 @@ impl Renderer {
             let terrain_pass =
                 |encoder: &mut wgpu::CommandEncoder, surface: &wgpu::TextureView, clear: bool| {
                     // Its lifetime forgotten: a closure cannot tie it to `encoder`'s.
-                    let mut pass = surface_pass(encoder, world_view, surface, world_depth, clear)
-                        .forget_lifetime();
+                    let mut pass = surface_pass(
+                        encoder,
+                        world_view,
+                        surface,
+                        world_depth,
+                        clear,
+                        world_comp_box,
+                        world_target_size,
+                    )
+                    .forget_lifetime();
                     pass.set_bind_group(0, &self.group, &[]);
                     pack_frame(&mut pass);
                     pass
                 };
             // The occlusion test's pipeline draws into the world's colour alone.
             let plain_pass = |encoder: &mut wgpu::CommandEncoder| {
-                let mut pass =
-                    world_pass_after_culling(encoder, world_view, world_depth, true, None, "")
-                        .forget_lifetime();
+                let mut pass = world_pass_after_culling(
+                    encoder,
+                    world_view,
+                    world_depth,
+                    true,
+                    None,
+                    "",
+                    world_comp_box,
+                    world_target_size,
+                )
+                .forget_lifetime();
                 pass.set_bind_group(0, &self.group, &[]);
                 pack_frame(&mut pass);
                 pass
@@ -10443,6 +10555,8 @@ impl Renderer {
                         keep_depth,
                         self.own_timing.as_mut(),
                         "World after visibility buffer",
+                        world_comp_box,
+                        world_target_size,
                     );
                     pass.set_bind_group(0, &self.group, &[]);
                     pack_frame(&mut pass);
@@ -10497,6 +10611,8 @@ impl Renderer {
                                     keep_depth,
                                     self.own_timing.as_mut(),
                                     "World after culling",
+                                    world_comp_box,
+                                    world_target_size,
                                 ),
                             };
                             pass.set_bind_group(0, &self.group, &[]);
@@ -10571,6 +10687,8 @@ impl Renderer {
                                     keep_depth,
                                     self.own_timing.as_mut(),
                                     "World after culling",
+                                    world_comp_box,
+                                    world_target_size,
                                 ),
                             };
                             pass.set_bind_group(0, &self.group, &[]);
@@ -10639,6 +10757,8 @@ impl Renderer {
                                         keep_depth,
                                         self.own_timing.as_mut(),
                                         "World after culling",
+                                        world_comp_box,
+                                        world_target_size,
                                     ),
                                 };
                                 pass.set_bind_group(0, &self.group, &[]);
@@ -10921,6 +11041,8 @@ impl Renderer {
                     keep_depth,
                     self.own_timing.as_mut(),
                     "World after copy",
+                    world_comp_box,
+                    world_target_size,
                 );
                 pass.set_bind_group(0, &self.group, &[]);
                 pack_frame(&mut pass);
@@ -11083,6 +11205,7 @@ impl Renderer {
                         },
                         &extras,
                         own_timing.as_mut(),
+                        world_comp_box,
                     );
                     self.own_timing = own_timing;
                     pass = world_pass_after_culling(
@@ -11092,6 +11215,8 @@ impl Renderer {
                         true,
                         self.own_timing.as_mut(),
                         "World after OIT",
+                        world_comp_box,
+                        world_target_size,
                     );
                     pass.set_bind_group(0, &self.group, &[]);
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -11801,6 +11926,11 @@ impl Renderer {
                 }),
                 ..Default::default()
             });
+            apply_comp_box(
+                &mut pass,
+                frame.comp_box,
+                [self.config.width, self.config.height],
+            );
             pass.set_pipeline(&self.entity_pipeline);
             pass.set_bind_group(0, &self.hand_group, &[]);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -11886,6 +12016,8 @@ impl Renderer {
             &self.indices,
             &self.entity_buffer,
             timing.as_mut(),
+            frame.comp_box,
+            [self.config.width, self.config.height],
         );
         // The world icon grabs here: after the level and the hand, before
         // the effects and the HUD draw over them (`tryTakeScreenshotIfNeeded`
@@ -11950,6 +12082,11 @@ impl Renderer {
                 color_attachments: &attachments,
                 ..Default::default()
             });
+            apply_comp_box(
+                &mut pass,
+                frame.comp_box,
+                [self.config.width, self.config.height],
+            );
             pass.set_bind_group(0, &self.entity_group, &[]);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.set_vertex_buffer(0, self.screen_buffer.slice(..));
@@ -11989,6 +12126,11 @@ impl Renderer {
                     color_attachments: &attachments,
                     ..Default::default()
                 });
+                apply_comp_box(
+                    &mut pass,
+                    frame.comp_box,
+                    [self.config.width, self.config.height],
+                );
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_vertex_buffer(0, self.screen_buffer.slice(..));
@@ -12043,6 +12185,11 @@ impl Renderer {
                 }),
                 ..Default::default()
             });
+            apply_comp_box(
+                &mut pass,
+                frame.comp_box,
+                [self.config.width, self.config.height],
+            );
             pass.set_pipeline(if coverage.is_some() {
                 self.debug_crosshair.as_ref().unwrap()
             } else {
@@ -12057,6 +12204,10 @@ impl Renderer {
             .menu_blur
             .filter(|_| self.config.usage.contains(wgpu::TextureUsages::COPY_SRC));
         let blur_at = menu_blur.map_or(0, |_| frame.hud.blur_at);
+        let editor_at = frame
+            .hud
+            .studio_editor_at
+            .unwrap_or(frame.hud.vertices.len() as u32);
         self.hud.draw_range(
             encoder,
             hud_target,
@@ -12064,8 +12215,9 @@ impl Renderer {
             &self.depth,
             frame.hud,
             [self.config.width, self.config.height],
-            0..blur_at,
+            0..blur_at.min(editor_at),
             timing.as_mut(),
+            frame.comp_box,
         );
         if let Some(radius) = menu_blur {
             let format = self.frame_format;
@@ -12116,8 +12268,20 @@ impl Renderer {
             &self.depth,
             frame.hud,
             [self.config.width, self.config.height],
-            blur_at..frame.hud.vertices.len() as u32,
+            blur_at.min(editor_at)..editor_at,
             timing.as_mut(),
+            frame.comp_box,
+        );
+        self.hud.draw_range(
+            encoder,
+            hud_target,
+            coverage.as_ref(),
+            &self.depth,
+            frame.hud,
+            [self.config.width, self.config.height],
+            editor_at..frame.hud.vertices.len() as u32,
+            timing.as_mut(),
+            None,
         );
         if overlay.real {
             self.own_timing = timing;

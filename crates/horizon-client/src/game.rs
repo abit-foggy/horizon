@@ -7897,6 +7897,44 @@ impl Game<'_> {
         self.frame_graph
             .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
         self.draw_pad_cursor(&mut batch);
+        if !self.ui.hide_gui
+            && self.screen == Screen::Playing
+            && (self.studio_replay.is_some() || self.studio_freecam.active)
+        {
+            self.studio_visuals
+                .set_active_scene(self.studio_timeline.selected_scene);
+            let timeline_bottom = if self.studio_timeline.visible {
+                self.studio_timeline.height()
+            } else {
+                0.0
+            };
+            batch.studio_editor_at = Some(batch.vertices.len() as u32);
+            self.studio_visuals
+                .render_guides(&mut batch, &self.gui.atlas, timeline_bottom);
+            self.studio_topbar.render(
+                &mut batch,
+                &self.gui.atlas,
+                self.cursor,
+                self.studio_freecam.locked_to_path,
+                &self.settings.keys,
+            );
+            self.studio_timeline.render(
+                &mut batch,
+                &self.gui.atlas,
+                self.cursor,
+                &self.studio_freecam,
+            );
+            self.studio_visuals.render(
+                &mut batch,
+                &self.gui.atlas,
+                self.cursor,
+                if self.studio_timeline.visible {
+                    self.studio_timeline.height()
+                } else {
+                    0.0
+                },
+            );
+        }
         batch
     }
     fn hud_layers(&mut self, size: [u32; 2]) -> HudBatch {
@@ -8311,45 +8349,6 @@ impl Game<'_> {
             self.remote_hud(&mut batch);
             self.draw_sign_editor(&mut batch);
             self.draw_book(&mut batch);
-        }
-        if !self.ui.hide_gui
-            && self.screen == Screen::Playing
-            && (self.studio_replay.is_some() || self.studio_freecam.active)
-        {
-            self.studio_visuals
-                .set_active_scene(self.studio_timeline.selected_scene);
-            self.studio_topbar.render(
-                &mut batch,
-                &self.gui.atlas,
-                self.cursor,
-                self.studio_freecam.locked_to_path,
-                &self.settings.keys,
-            );
-            self.studio_timeline.render(
-                &mut batch,
-                &self.gui.atlas,
-                self.cursor,
-                &self.studio_freecam,
-            );
-            self.studio_visuals.render(
-                &mut batch,
-                &self.gui.atlas,
-                self.cursor,
-                if self.studio_timeline.visible {
-                    self.studio_timeline.height()
-                } else {
-                    0.0
-                },
-            );
-            self.studio_visuals.render_guides(
-                &mut batch,
-                &self.gui.atlas,
-                if self.studio_timeline.visible {
-                    self.studio_timeline.height()
-                } else {
-                    0.0
-                },
-            );
         }
         if show_hud {
             self.draw_pad_guide(&mut batch, guide_from);
@@ -14242,7 +14241,7 @@ impl Game<'_> {
             glam::Mat4::IDENTITY
         } else {
             self.bob_matrix(camera_alpha as f32)
-        };
+        } * self.studio_camera_effects_matrix(camera_alpha as f32);
         let spin = if !camera_effects {
             glam::Mat4::IDENTITY
         } else {
@@ -14252,6 +14251,24 @@ impl Game<'_> {
         let distance = (terrain_distance * 16) as f32;
         let depth_far =
             horizon_client::camera::depth_far(terrain_distance, self.settings.cloud_range);
+        let studio_composition_active = !self.ui.hide_gui
+            && self.screen == Screen::Playing
+            && (self.studio_replay.is_some() || self.studio_freecam.active);
+        let timeline_bottom = if self.studio_timeline.visible {
+            self.studio_timeline.height()
+        } else {
+            0.0
+        };
+        let studio_comp_box = studio_composition_active
+            .then(|| {
+                let gui = HudBatch::new(size);
+                self.studio_visuals.comp_box_viewport(
+                    [gui.width, gui.height],
+                    size,
+                    timeline_bottom,
+                )
+            })
+            .flatten();
         // Only native mods read it: no matrices or allocation per frame without one.
         let mods_read_camera = !horizon_client::mod_api::mods().is_empty();
         self.screen_blur_requested.set(false);
@@ -14271,7 +14288,10 @@ impl Game<'_> {
                     .to_cols_array(),
                 projection: glam::Mat4::perspective_rh(
                     fov_degrees.to_radians(),
-                    size[0] as f32 / size[1].max(1) as f32,
+                    studio_comp_box.map_or(
+                        size[0] as f32 / size[1].max(1) as f32,
+                        |[_, _, width, height]| width as f32 / height.max(1) as f32,
+                    ),
                     depth_far,
                     0.05,
                 )
@@ -14292,10 +14312,17 @@ impl Game<'_> {
         self.view_frustum = self
             .renderer
             .as_ref()
-            .map(|r| r.camera_frustum(fov_degrees, yaw, pitch, bob * spin, depth_far));
+            .map(|r| r.camera_frustum(fov_degrees, yaw, pitch, bob * spin, depth_far, studio_comp_box));
         let billboard_frustum = if self.settings.horizon.taa {
             self.renderer.as_ref().map(|r| {
-                r.camera_frustum_with_jitter(fov_degrees, yaw, pitch, bob * spin, depth_far)
+                r.camera_frustum_with_jitter(
+                    fov_degrees,
+                    yaw,
+                    pitch,
+                    bob * spin,
+                    depth_far,
+                    studio_comp_box,
+                )
             })
         } else {
             self.view_frustum
@@ -14426,6 +14453,7 @@ impl Game<'_> {
             .as_ref()
             .is_none_or(|_| self.studio_visuals.settings.world_entities);
         let frame = Frame {
+            comp_box: studio_comp_box,
             weather: &weather,
             weather_time: horizon_client::weather::Time::new(self.world.game_time, alpha as f32),
             nether_lighting: self.dim == Dim::Nether,
@@ -15988,6 +16016,7 @@ impl Game<'_> {
                                 0.0
                             },
                         ) {
+                            self.save_studio_editor_preferences();
                             return Ok(());
                         }
                         if self.studio_timeline.visible {
@@ -17399,6 +17428,7 @@ impl<'a> Game<'a> {
             fangs: Default::default(),
             player_model: None,
         };
+        game.load_studio_editor_preferences();
         if game.native_window() {
             game.native_client_start();
         }

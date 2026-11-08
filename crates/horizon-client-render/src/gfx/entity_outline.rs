@@ -263,6 +263,7 @@ impl EntityOutline {
     }
 
     /// `LevelRenderer.executeOutline`, the post chain and `blitEntityOutline` onto `frame`.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn draw(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -271,6 +272,8 @@ impl EntityOutline {
         indices: &wgpu::Buffer,
         entities: &wgpu::Buffer,
         mut timing: Option<&mut super::pack_timing::PassTiming>,
+        comp_box: Option<[u32; 4]>,
+        size: [u32; 2],
     ) {
         let Some(t) = self
             .targets
@@ -288,6 +291,7 @@ impl EntityOutline {
                 clear,
                 timing.as_deref_mut(),
             );
+            super::apply_comp_box(&mut pass, comp_box, size);
             pass.set_pipeline(&self.silhouette);
             pass.set_bind_group(0, entity_group, &[]);
             pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
