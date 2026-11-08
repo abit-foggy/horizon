@@ -195,11 +195,16 @@ impl VisualsSettings {
     }
 
     pub fn cycle_roll(&mut self) {
-        let presets = [-180.0, -90.0, 0.0, 90.0, 180.0];
+        let presets = [-90.0, 0.0, 90.0, 180.0];
+        let current = if (self.camera_roll.abs() - 180.0).abs() < 1.0 {
+            180.0
+        } else {
+            self.camera_roll
+        };
         let idx = presets
             .iter()
-            .position(|&degrees| (degrees - self.camera_roll).abs() < 1.0)
-            .unwrap_or(2);
+            .position(|&degrees| (degrees - current).abs() < 1.0)
+            .unwrap_or(1);
         self.camera_roll = presets[(idx + 1) % presets.len()];
     }
 
@@ -518,19 +523,35 @@ impl VisualsUi {
             );
 
             // Composition header label badge
-            let badge_w = 150.0;
+            let badge_label = Text::translate("horizon.studio.visuals.composition.active_camera", &[]);
+            let text_width = atlas.font.width_text(&badge_label.resolved());
+            let badge_w = (text_width + 16.0).max(180.0);
+            let badge_h = 18.0;
+            let badge_y = (comp_y - badge_h).max(top_offset);
             style::fill(
                 batch,
                 atlas,
-                [comp_x, (comp_y - 18.0).max(top_offset), badge_w, 17.0],
-                0xDD1F_232B,
+                [comp_x, badge_y, badge_w, badge_h],
+                0xFF2A_303C,
+            );
+            style::ring(
+                batch,
+                atlas,
+                [comp_x, badge_y, badge_w, badge_h],
+                0xFF4A_5468,
+            );
+            style::fill(
+                batch,
+                atlas,
+                [comp_x, badge_y, badge_w, 2.0],
+                style::ACCENT,
             );
             batch.text_styled(
                 atlas,
-                &Text::translate("horizon.studio.visuals.composition.active_camera", &[]),
-                comp_x + 6.0,
-                (comp_y - 15.0).max(top_offset + 3.0),
-                style::SOFT,
+                &badge_label,
+                comp_x + 8.0,
+                badge_y + 5.0,
+                style::WHITE,
                 true,
             );
 
@@ -1789,5 +1810,24 @@ mod tests {
         ]);
         assert!(viewport[0] + viewport[2] <= 1920);
         assert!(viewport[1] + viewport[3] <= 1080);
+    }
+
+    #[test]
+    fn cycle_roll_skips_redundant_negative_180() {
+        let mut settings = VisualsSettings::default();
+        settings.camera_roll = 0.0;
+        settings.cycle_roll();
+        assert_eq!(settings.camera_roll, 90.0);
+        settings.cycle_roll();
+        assert_eq!(settings.camera_roll, 180.0);
+        settings.cycle_roll();
+        assert_eq!(settings.camera_roll, -90.0);
+        settings.cycle_roll();
+        assert_eq!(settings.camera_roll, 0.0);
+
+        // If starting at -180, normalize to 180 and cycle to -90
+        settings.camera_roll = -180.0;
+        settings.cycle_roll();
+        assert_eq!(settings.camera_roll, -90.0);
     }
 }
