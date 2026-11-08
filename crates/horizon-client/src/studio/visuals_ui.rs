@@ -284,8 +284,9 @@ impl Default for VisualsUi {
 impl VisualsUi {
     pub fn handle_resize_drag(&mut self, cursor_x: f32, screen_width: f32) {
         if self.resizing_width {
-            let max_w = (screen_width * 0.6).clamp(240.0, 480.0);
-            let new_width = (screen_width - cursor_x).clamp(160.0, max_w);
+            let max_w = (screen_width - 180.0).clamp(160.0, 480.0);
+            let min_w = 160.0_f32.min(max_w);
+            let new_width = (screen_width - cursor_x).clamp(min_w, max_w);
             self.width = new_width.round();
         }
     }
@@ -462,16 +463,17 @@ impl VisualsUi {
         let (guide_x, guide_y, guide_w, guide_h) = if self.settings.editor_canvas_box {
             let [comp_x, comp_y, comp_w, comp_h] = self.comp_box_rect(w, h, bottom_offset);
             let top_offset = Self::TOP_OFFSET;
+            let workspace_w = if self.open { (w - self.width).max(0.0) } else { w };
 
-            // Workspace dark charcoal matte surrounding the composition box
+            // Workspace dark charcoal matte surrounding the composition box (strictly bounded by workspace_w)
             let matte_color = 0xFF14_161D;
             let tab_bar_y = comp_y - Self::TAB_BAR_HEIGHT;
-            // Top matte (between topbar and tab bar)
-            if tab_bar_y > top_offset {
+            // Top matte (between topbar and tab bar, constrained to workspace_w)
+            if tab_bar_y > top_offset && workspace_w > 0.0 {
                 style::fill(
                     batch,
                     atlas,
-                    [0.0, top_offset, w, tab_bar_y - top_offset],
+                    [0.0, top_offset, workspace_w, tab_bar_y - top_offset],
                     matte_color,
                 );
             }
@@ -484,9 +486,9 @@ impl VisualsUi {
                     matte_color,
                 );
             }
-            // Right of tab bar matte
+            // Right of tab bar matte (up to workspace_w)
             let right_tab_x = comp_x + comp_w;
-            let right_tab_w = (w - right_tab_x).max(0.0);
+            let right_tab_w = (workspace_w - right_tab_x).max(0.0);
             if right_tab_w > 0.0 {
                 style::fill(
                     batch,
@@ -495,14 +497,14 @@ impl VisualsUi {
                     matte_color,
                 );
             }
-            // Bottom matte (between comp box and timeline)
+            // Bottom matte (between comp box and timeline, constrained to workspace_w)
             let bottom_matte_y = comp_y + comp_h;
             let bottom_matte_h = (h - bottom_offset - bottom_matte_y).max(0.0);
-            if bottom_matte_h > 0.0 {
+            if bottom_matte_h > 0.0 && workspace_w > 0.0 {
                 style::fill(
                     batch,
                     atlas,
-                    [0.0, bottom_matte_y, w, bottom_matte_h],
+                    [0.0, bottom_matte_y, workspace_w, bottom_matte_h],
                     matte_color,
                 );
             }
@@ -510,9 +512,9 @@ impl VisualsUi {
             if comp_x > 0.0 {
                 style::fill(batch, atlas, [0.0, comp_y, comp_x, comp_h], matte_color);
             }
-            // Right matte (up to screen edge, extending behind sidebar)
+            // Right matte (up to workspace_w, never bleeding behind sidebar)
             let right_matte_x = comp_x + comp_w;
-            let right_matte_w = (w - right_matte_x).max(0.0);
+            let right_matte_w = (workspace_w - right_matte_x).max(0.0);
             if right_matte_w > 0.0 {
                 style::fill(
                     batch,
@@ -571,71 +573,64 @@ impl VisualsUi {
                 0xFF36_3D4D,
             );
 
-            let mut tab_x = comp_x;
+            let num_tabs = self.tabs.tabs().len().max(1);
+            let tab_w = comp_w / num_tabs as f32;
+
             for (idx, tab) in self.tabs.tabs().iter().enumerate() {
                 let is_active = idx == self.tabs.active_index();
                 let title = if let Some(custom) = &tab.custom_title {
-                    Text::literal(custom.clone())
+                    custom.clone()
                 } else {
-                    Text::translate(&tab.title_key, &[])
+                    crate::lang::get(&tab.title_key)
                 };
-                let text_w = atlas.font.width_text(&title.resolved());
-                let close_w = if tab.closable { 14.0 } else { 0.0 };
-                let tab_w = (text_w + 20.0 + close_w).clamp(80.0, 180.0);
 
-                if tab_x + tab_w > comp_x + comp_w - 10.0 && idx > 0 {
-                    break;
-                }
-
+                let tab_x = comp_x + idx as f32 * tab_w;
                 let tab_rect = [tab_x, tab_bar_y + 1.0, tab_w, Self::TAB_BAR_HEIGHT - 1.0];
+
                 if is_active {
                     style::fill(batch, atlas, tab_rect, 0xFF28_2E3B);
-                    // Active top accent line
+                    // Active top accent line matching tab width exactly
                     style::fill(
                         batch,
                         atlas,
                         [tab_x, tab_bar_y, tab_w, 2.0],
                         style::ACCENT,
                     );
-                    // Right separator
+                }
+
+                // Separator line between tabs
+                if idx + 1 < num_tabs {
                     style::fill(
                         batch,
                         atlas,
                         [tab_x + tab_w - 1.0, tab_bar_y + 3.0, 1.0, Self::TAB_BAR_HEIGHT - 6.0],
-                        0xFF3E_4759,
-                    );
-                } else {
-                    // Inactive right separator
-                    style::fill(
-                        batch,
-                        atlas,
-                        [tab_x + tab_w - 1.0, tab_bar_y + 4.0, 1.0, Self::TAB_BAR_HEIGHT - 8.0],
-                        0xFF2A_303C,
+                        if is_active { 0xFF3E_4759 } else { 0xFF2A_303C },
                     );
                 }
 
+                let close_w = if tab.closable { 16.0 } else { 0.0 };
+                let max_text_w = (tab_w - 16.0 - close_w).max(10.0);
+                let fitted_title = style::fit(atlas, &title, max_text_w);
                 batch.text_styled(
                     atlas,
-                    &title,
+                    &Text::literal(fitted_title),
                     tab_x + 8.0,
                     tab_bar_y + 6.0,
                     if is_active { style::WHITE } else { style::MUTED },
                     true,
                 );
 
-                if tab.closable {
+                if tab.closable && tab_w >= 40.0 {
                     let close_x = tab_x + tab_w - 14.0;
                     batch.text_styled(
                         atlas,
                         &Text::literal("x"),
-                        close_x + 2.0,
+                        close_x,
                         tab_bar_y + 5.0,
                         style::MUTED,
                         true,
                     );
                 }
-
-                tab_x += tab_w;
             }
 
             // Resolution/zoom badge at bottom-right
@@ -1335,24 +1330,19 @@ impl VisualsUi {
                 && cursor.1 >= tab_bar_y
                 && cursor.1 <= tab_bar_y + Self::TAB_BAR_HEIGHT
             {
-                let mut tab_x = comp_x;
-                for (idx, tab) in self.tabs.tabs().iter().enumerate() {
-                    let title_len = tab.custom_title.as_ref().map(|s| s.len()).unwrap_or(14);
-                    let tab_w = crate::studio::tabs::StudioTabSystem::tab_width(title_len, tab.closable);
-                    if tab_x + tab_w > comp_x + comp_w - 10.0 && idx > 0 {
-                        break;
+                let num_tabs = self.tabs.tabs().len().max(1);
+                let tab_w = comp_w / num_tabs as f32;
+                let clicked_idx = ((cursor.0 - comp_x) / tab_w).floor() as usize;
+                if clicked_idx < self.tabs.tabs().len() {
+                    let tab_x = comp_x + clicked_idx as f32 * tab_w;
+                    let tab = &self.tabs.tabs()[clicked_idx];
+                    if tab.closable && cursor.0 >= tab_x + tab_w - 16.0 {
+                        self.tabs.close_tab_at(clicked_idx);
+                    } else {
+                        self.tabs.select_tab(clicked_idx);
                     }
-                    if tab.closable && cursor.0 >= tab_x + tab_w - 16.0 && cursor.0 <= tab_x + tab_w {
-                        self.tabs.close_tab_at(idx);
-                        return true;
-                    }
-                    if cursor.0 >= tab_x && cursor.0 <= tab_x + tab_w {
-                        self.tabs.select_tab(idx);
-                        return true;
-                    }
-                    tab_x += tab_w;
+                    return true;
                 }
-                return true;
             }
         }
 
@@ -2010,21 +2000,23 @@ mod tests {
         );
         assert_eq!(ui.tabs.tabs().len(), 2);
 
-        let tab1_w = crate::studio::tabs::StudioTabSystem::tab_width(14, false);
-        let tab2_w = crate::studio::tabs::StudioTabSystem::tab_width("3D Preview".len(), true);
+        // Click on the second tab to switch
+        let tab1_w = w1 / 2.0;
         let click_x = x1 + tab1_w + 10.0;
         let click_y = y1 - VisualsUi::TAB_BAR_HEIGHT + 10.0;
         let handled = ui.handle_mouse_click((click_x, click_y), screen_w, screen_h, bottom_offset);
         assert!(handled);
         assert_eq!(ui.tabs.active_index(), 1);
 
+        // Resize visuals sidebar: comp box width resizes, tab bar width matches
         ui.open = true;
         ui.width = 300.0;
         let [x2, y2, w2, _] = ui.comp_box_rect(screen_w, screen_h, bottom_offset);
         assert!(w2 < w1, "composition box and tab bar resize dynamically with sidebar");
         assert!(y2 - VisualsUi::TAB_BAR_HEIGHT >= VisualsUi::TOP_OFFSET);
 
-        let close_x = x2 + tab1_w + tab2_w - 6.0;
+        // Close second tab via close button at right of tab 2
+        let close_x = x2 + w2 - 5.0;
         let close_y = y2 - VisualsUi::TAB_BAR_HEIGHT + 10.0;
         let handled = ui.handle_mouse_click((close_x, close_y), screen_w, screen_h, bottom_offset);
         assert!(handled);
