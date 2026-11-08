@@ -353,6 +353,8 @@ impl VisualsUi {
         }
     }
 
+    pub const TOP_OFFSET: f32 = crate::studio::topbar::TopBarUi::HEIGHT;
+
     /// Check if cursor is hovered over the visuals sidebar.
     pub fn is_hovered(
         &self,
@@ -364,7 +366,7 @@ impl VisualsUi {
         if !self.open {
             return false;
         }
-        let top_offset = 24.0;
+        let top_offset = Self::TOP_OFFSET;
         let panel_h = (screen_h - top_offset - bottom_offset).max(80.0);
         let panel_x = screen_w - self.width;
         let panel_y = top_offset;
@@ -379,7 +381,7 @@ impl VisualsUi {
         if !self.open {
             return false;
         }
-        let top_offset = 24.0;
+        let top_offset = Self::TOP_OFFSET;
         let panel_h = (screen_h - top_offset - bottom_offset).max(80.0);
         let content_h = panel_h - 22.0;
         let total_content_h = 480.0;
@@ -389,10 +391,10 @@ impl VisualsUi {
     }
 
     /// Calculate the composition box bounds `[x, y, w, h]` strictly constrained between
-    /// the top menu bar (y = 24) and timeline (y = screen_h - bottom_offset), and offset horizontally
+    /// the top menu bar (y = 20) and timeline (y = screen_h - bottom_offset), and offset horizontally
     /// when the visuals sidebar is open.
     pub fn comp_box_rect(&self, screen_w: f32, screen_h: f32, bottom_offset: f32) -> [f32; 4] {
-        let top_offset = 24.0;
+        let top_offset = Self::TOP_OFFSET;
         let right_offset = if self.open { self.width } else { 0.0 };
         let workspace_x = 0.0;
         let workspace_y = top_offset;
@@ -459,7 +461,7 @@ impl VisualsUi {
 
         let (guide_x, guide_y, guide_w, guide_h) = if self.settings.editor_canvas_box {
             let [comp_x, comp_y, comp_w, comp_h] = self.comp_box_rect(w, h, bottom_offset);
-            let top_offset = 24.0;
+            let top_offset = Self::TOP_OFFSET;
 
             // Workspace dark charcoal matte surrounding the composition box
             let matte_color = 0xFF14_161D;
@@ -715,7 +717,7 @@ impl VisualsUi {
             return;
         }
 
-        let top_offset = 24.0;
+        let top_offset = Self::TOP_OFFSET;
         let screen_w = batch.width;
         let screen_h = batch.height;
         let panel_h = (screen_h - top_offset - bottom_offset).max(80.0);
@@ -1243,7 +1245,7 @@ impl VisualsUi {
             return false;
         }
 
-        let top_offset = 24.0;
+        let top_offset = Self::TOP_OFFSET;
         let panel_h = (screen_h - top_offset - bottom_offset).max(80.0);
         let panel_x = screen_w - self.width;
         let panel_y = top_offset;
@@ -1753,7 +1755,7 @@ mod tests {
         // 1. When sidebar is closed: centered within full screen_w
         ui.open = false;
         let [x1, y1, w1, h1] = ui.comp_box_rect(screen_w, screen_h, bottom_offset);
-        assert!(y1 >= 24.0, "comp box y must be below top bar (24px)");
+        assert!(y1 >= VisualsUi::TOP_OFFSET, "comp box y must be below top bar");
         assert!(
             y1 + h1 <= screen_h - bottom_offset,
             "comp box bottom must be above timeline"
@@ -1781,7 +1783,7 @@ mod tests {
             x2 + w2 <= workspace_w,
             "comp box must not overlap the visuals panel"
         );
-        assert!(y2 >= 24.0);
+        assert!(y2 >= VisualsUi::TOP_OFFSET);
     }
 
     #[test]

@@ -96,6 +96,10 @@ impl TopBarLayout {
     }
 }
 
+impl TopBarUi {
+    pub const HEIGHT: f32 = 20.0;
+}
+
 #[derive(Clone, Debug)]
 pub struct TopBarUi {
     pub open_menu: Option<TopBarMenu>,
@@ -106,7 +110,7 @@ impl Default for TopBarUi {
     fn default() -> Self {
         Self {
             open_menu: None,
-            height: 24.0,
+            height: Self::HEIGHT,
         }
     }
 }
