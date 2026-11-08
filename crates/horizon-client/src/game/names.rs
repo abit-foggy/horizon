@@ -228,6 +228,9 @@ impl Game<'_> {
         self.name_tags_with_hooks(camera, alpha, !mod_api::mods().is_empty())
     }
     fn name_tags_with_hooks(&self, camera: glam::DVec3, alpha: f64, hooks: bool) -> Vec<NameTag> {
+        if self.studio_replay.is_some() && !self.studio_visuals.settings.world_nametags {
+            return Vec::new();
+        }
         self.collect_name_tags(camera, alpha, hooks, None)
     }
     fn collect_name_tags(

@@ -136,7 +136,7 @@ impl Game<'_> {
     /// `Camera.calculateFov` with `modifyFovBasedOnDeathOrFluid`.
     pub(super) fn fov_degrees(&self, partial: f32, camera: [f64; 3]) -> f32 {
         if self.studio_replay.is_some() && self.studio_visuals.settings.override_fov {
-            return self.studio_visuals.settings.fov_degrees.clamp(30.0, 130.0);
+            return self.studio_visuals.settings.fov_value.clamp(30.0, 130.0);
         }
         if self.studio_freecam.active {
             return self.studio_freecam.fov.clamp(1.0, 179.0);
@@ -215,8 +215,22 @@ impl Game<'_> {
             )),
         };
         let tilt = self.settings.file.double("damageTiltStrength");
-        glam::Mat4::from_cols_array(&bob_matrix(&state, tilt, self.settings.view_bobbing).m)
-            * self.native_shake_matrix(partial)
+        let mut matrix =
+            glam::Mat4::from_cols_array(&bob_matrix(&state, tilt, self.settings.view_bobbing).m)
+                * self.native_shake_matrix(partial);
+        if self.studio_replay.is_some()
+            && self.studio_visuals.settings.override_shake
+            && self.studio_visuals.settings.shake_intensity > 0.0
+        {
+            let intensity = self.studio_visuals.settings.shake_intensity;
+            let time = (self.ticks as f32 + partial) * 0.25;
+            matrix *= glam::Mat4::from_translation(glam::vec3(
+                (time * 12.0).sin() * 0.03 * intensity,
+                (time * 17.0).cos() * 0.03 * intensity,
+                0.0,
+            )) * glam::Mat4::from_rotation_z((time * 9.0).sin() * 0.02 * intensity);
+        }
+        matrix
     }
     /// `AbstractClientPlayer.tick` and `aiStep` (`ClientAvatarState.tick`,
     /// `updateBob`), `rideTick`'s `resetBob` and `LocalPlayer.move`'s walked

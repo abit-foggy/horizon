@@ -4093,7 +4093,7 @@ impl OptionsUi {
                 return Vec::new();
             }
             use crate::studio_ui::StudioSettingsAction;
-            return match self.studio_settings.click((x, y), size) {
+            return match self.studio_settings.click((x, y), size, &s.studio) {
                 StudioSettingsAction::None => Vec::new(),
                 StudioSettingsAction::ToggleSounds => {
                     s.studio.record_sounds = !s.studio.record_sounds;
@@ -4534,6 +4534,7 @@ impl OptionsUi {
             return Vec::new();
         }
         if self.page() == Page::StudioSettings {
+            self.studio_settings.wheel(amount, size, cursor);
             return Vec::new();
         }
         if Self::controller_page(self.page()).is_some() {

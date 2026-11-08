@@ -8316,6 +8316,8 @@ impl Game<'_> {
             && self.screen == Screen::Playing
             && (self.studio_replay.is_some() || self.studio_freecam.active)
         {
+            self.studio_visuals
+                .set_active_scene(self.studio_timeline.selected_scene);
             self.studio_topbar.render(
                 &mut batch,
                 &self.gui.atlas,
@@ -14084,7 +14086,7 @@ impl Game<'_> {
         let mut lines = self.fishing_line(alpha, size);
         let mut g = self.debug_gizmos(alpha as f32, camera.to_array());
         if (self.studio_freecam.active || self.studio_replay.is_some())
-            && self.studio_visuals.settings.camera_path
+            && self.studio_visuals.settings.camera_path_3d
         {
             horizon_client::studio::render_camera_path(
                 &self.studio_freecam.track,
@@ -14466,8 +14468,12 @@ impl Game<'_> {
                     || self.potions.effects.get("darkness").is_some(),
                 self.boss_overlay.should_create_world_fog(),
             ),
-            skybox: self.dim == Dim::Overworld && self.settings.horizon.sky,
-            end_sky: self.dim == Dim::End && self.settings.horizon.sky,
+            skybox: self.dim == Dim::Overworld
+                && self.settings.horizon.sky
+                && (self.studio_replay.is_none() || self.studio_visuals.settings.world_sky),
+            end_sky: self.dim == Dim::End
+                && self.settings.horizon.sky
+                && (self.studio_replay.is_none() || self.studio_visuals.settings.world_sky),
             end_sky_sprite: self
                 .gui
                 .atlas
@@ -15619,8 +15625,32 @@ impl Game<'_> {
                         }
                     }
                 }
-                WindowEvent::MouseWheel { .. }
-                    if self.screen == Screen::Playing && self.studio_replay.is_some() => {}
+                WindowEvent::MouseWheel { delta, .. }
+                    if self.screen == Screen::Playing
+                        && (self.studio_replay.is_some() || self.studio_freecam.active) =>
+                {
+                    let amount = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => y,
+                        MouseScrollDelta::PixelDelta(p) => (p.y / 30.0) as f32,
+                    };
+                    if let Some(renderer) = &self.renderer {
+                        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+                        let bottom = if self.studio_timeline.visible {
+                            self.studio_timeline.height()
+                        } else {
+                            0.0
+                        };
+                        if self.studio_visuals.is_hovered(
+                            self.cursor,
+                            batch.width,
+                            batch.height,
+                            bottom,
+                        ) {
+                            self.studio_visuals
+                                .handle_scroll(amount, batch.height, bottom);
+                        }
+                    }
+                }
                 WindowEvent::MouseWheel { delta, .. } => {
                     let (raw_x, raw_y) = match delta {
                         MouseScrollDelta::LineDelta(x, y) => (f64::from(x), f64::from(y)),
@@ -15950,7 +15980,8 @@ impl Game<'_> {
                         }
                         if self.studio_visuals.handle_mouse_click(
                             self.cursor,
-                            (batch.width, batch.height),
+                            batch.width,
+                            batch.height,
                             if self.studio_timeline.visible {
                                 self.studio_timeline.height()
                             } else {

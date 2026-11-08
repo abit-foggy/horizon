@@ -543,9 +543,83 @@ pub enum StudioSettingsAction {
 
 /// Renderer for recording-related Studio settings, separate from shot visuals.
 #[derive(Clone, Debug, Default)]
-pub struct StudioSettingsUi;
+pub struct StudioSettingsUi {
+    scroll: f32,
+}
 
 impl StudioSettingsUi {
+    const ROW_H: f32 = 54.0;
+    const SECTION_H: f32 = 22.0;
+
+    fn geometry(size: (f32, f32)) -> ([f32; 4], [f32; 4], [f32; 4]) {
+        let (w, h) = size;
+        let panel_w = (w - 32.0).clamp(280.0, 520.0).min(w.max(1.0));
+        let panel_x = ((w - panel_w) / 2.0).floor();
+        let panel_y = 62.0_f32.min((h - 80.0).max(8.0));
+        let panel_h = (h - panel_y - 42.0).max(96.0);
+        let panel = [panel_x, panel_y, panel_w, panel_h];
+        let viewport = [
+            panel_x + 8.0,
+            panel_y + 34.0,
+            panel_w - 16.0,
+            (panel_h - 70.0).max(0.0),
+        ];
+        let done = [panel_x + panel_w - 84.0, h - 30.0, 84.0, 20.0];
+        (panel, viewport, done)
+    }
+
+    fn rows(
+        settings: &crate::studio_preferences::StudioPreferences,
+    ) -> [(
+        Option<&'static str>,
+        &'static str,
+        &'static str,
+        StudioSettingsAction,
+        bool,
+    ); 5] {
+        [
+            (
+                Some("horizon.studio.settings.section.privacy"),
+                "horizon.studio.settings.skins",
+                "horizon.studio.settings.skins.description",
+                StudioSettingsAction::ToggleSkins,
+                settings.record_player_skins,
+            ),
+            (
+                None,
+                "horizon.studio.settings.names",
+                "horizon.studio.settings.names.description",
+                StudioSettingsAction::ToggleNames,
+                settings.record_player_names,
+            ),
+            (
+                Some("horizon.studio.settings.section.recording"),
+                "horizon.studio.settings.sounds",
+                "horizon.studio.settings.sounds.description",
+                StudioSettingsAction::ToggleSounds,
+                settings.record_sounds,
+            ),
+            (
+                Some("horizon.studio.settings.section.archive"),
+                "horizon.studio.settings.mods",
+                "horizon.studio.settings.mods.description",
+                StudioSettingsAction::ToggleModsManifest,
+                settings.include_mods_manifest,
+            ),
+            (
+                None,
+                "horizon.studio.settings.resource_pack",
+                "horizon.studio.settings.resource_pack.description",
+                StudioSettingsAction::ToggleResourcePack,
+                settings.include_resource_pack,
+            ),
+        ]
+    }
+
+    fn content_height() -> f32 {
+        3.0 * Self::SECTION_H + 5.0 * Self::ROW_H
+    }
+
     pub fn draw(
         &self,
         batch: &mut HudBatch,
@@ -571,56 +645,82 @@ impl StudioSettingsUi {
             style::GREY,
         );
 
-        let panel_w = (w - 40.0).clamp(280.0, 460.0);
-        let panel_x = ((w - panel_w) / 2.0).floor();
-        let panel_y = 62.0;
-        let panel_h = (h - 104.0).max(86.0);
-        style::panel(batch, atlas, [panel_x, panel_y, panel_w, panel_h]);
+        let (panel, viewport, done) = Self::geometry((w, h));
+        style::panel(batch, atlas, panel);
+        style::fill(
+            batch,
+            atlas,
+            [panel[0], panel[1], panel[2], 24.0],
+            style::OPEN,
+        );
 
-        let row_x = panel_x + 12.0;
-        let row_w = panel_w - 24.0;
-        let row_h = 28.0;
-        let sounds = [row_x, panel_y + 10.0, row_w, row_h];
-        let skins = [row_x, panel_y + 42.0, row_w, row_h];
-        let names = [row_x, panel_y + 74.0, row_w, row_h];
-        let mods = [row_x, panel_y + 106.0, row_w, row_h];
-        let resource_pack = [row_x, panel_y + 138.0, row_w, row_h];
-        for (rect, key, enabled) in [
-            (
-                sounds,
-                "horizon.studio.settings.sounds",
-                settings.record_sounds,
-            ),
-            (
-                skins,
-                "horizon.studio.settings.skins",
-                settings.record_player_skins,
-            ),
-            (
-                names,
-                "horizon.studio.settings.names",
-                settings.record_player_names,
-            ),
-            (
-                mods,
-                "horizon.studio.settings.mods",
-                settings.include_mods_manifest,
-            ),
-            (
-                resource_pack,
-                "horizon.studio.settings.resource_pack",
-                settings.include_resource_pack,
-            ),
-        ] {
-            let value = Text::translate(if enabled { "options.on" } else { "options.off" }, &[]);
-            let label = Text::translate(key, &[value]);
-            let hovered = ui::hovered(cursor, rect[0], rect[1], rect[2], rect[3]);
-            ui::button(
-                batch, atlas, rect[0], rect[1], rect[2], rect[3], &label, true, hovered,
+        let rows = Self::rows(settings);
+        let max_scroll = (Self::content_height() - viewport[3]).max(0.0);
+        let mut y = viewport[1] - self.scroll.min(max_scroll);
+        let mut section = None;
+        for (new_section, label, description, _action, enabled) in rows {
+            if let Some(key) = new_section {
+                if section != Some(key) {
+                    section = Some(key);
+                    style::fill(
+                        batch,
+                        atlas,
+                        [viewport[0], y, viewport[2], 18.0],
+                        style::ROW_RULE,
+                    );
+                    batch.text_styled(
+                        atlas,
+                        &Text::translate(key, &[]),
+                        viewport[0] + 4.0,
+                        y + 2.0,
+                        style::SOFT,
+                        true,
+                    );
+                    y += Self::SECTION_H;
+                }
+            }
+            let rect = [viewport[0], y, viewport[2], Self::ROW_H - 4.0];
+            if rect[1] >= viewport[1] && rect[1] + rect[3] <= viewport[1] + viewport[3] {
+                let hovered = ui::hovered(cursor, rect[0], rect[1], rect[2], rect[3]);
+                let on_off =
+                    Text::translate(if enabled { "options.on" } else { "options.off" }, &[]);
+                let button_label = Text::translate(label, &[on_off]);
+                style::button(batch, atlas, rect, &Text::empty(), (hovered, true, enabled));
+                batch.text_styled(
+                    atlas,
+                    &button_label,
+                    rect[0] + 10.0,
+                    rect[1] + 8.0,
+                    style::WHITE,
+                    true,
+                );
+                let hint = Text::translate(description, &[]);
+                batch.text_styled(
+                    atlas,
+                    &hint,
+                    rect[0] + 10.0,
+                    rect[1] + 31.0,
+                    style::MUTED,
+                    false,
+                );
+            }
+            y += Self::ROW_H;
+        }
+
+        if max_scroll > 0.0 {
+            let track = [panel[0] + panel[2] - 5.0, viewport[1], 2.0, viewport[3]];
+            let thumb_h = (viewport[3] * viewport[3] / Self::content_height()).max(18.0);
+            let thumb_y =
+                track[1] + self.scroll.min(max_scroll) / max_scroll * (track[3] - thumb_h);
+            style::fill(batch, atlas, track, 0x22FF_FFFF);
+            style::fill(
+                batch,
+                atlas,
+                [track[0] - 1.0, thumb_y, 4.0, thumb_h],
+                0x88CC_CCCC,
             );
         }
 
-        let done = [panel_x + panel_w - 84.0, h - 30.0, 84.0, 20.0];
         let done_hover = ui::hovered(cursor, done[0], done[1], done[2], done[3]);
         ui::action_button(
             batch,
@@ -636,41 +736,49 @@ impl StudioSettingsUi {
         );
     }
 
-    pub fn click(&self, cursor: (f32, f32), size: (f32, f32)) -> StudioSettingsAction {
-        let (w, h) = size;
-        let panel_w = (w - 40.0).clamp(280.0, 460.0);
-        let panel_x = ((w - panel_w) / 2.0).floor();
-        let panel_y = 62.0;
-        let row_x = panel_x + 12.0;
-        let row_w = panel_w - 24.0;
-        let row_h = 28.0;
-        let sounds = [row_x, panel_y + 10.0, row_w, row_h];
-        let skins = [row_x, panel_y + 42.0, row_w, row_h];
-        let names = [row_x, panel_y + 74.0, row_w, row_h];
-        let mods = [row_x, panel_y + 106.0, row_w, row_h];
-        let resource_pack = [row_x, panel_y + 138.0, row_w, row_h];
-        let done = [panel_x + panel_w - 84.0, h - 30.0, 84.0, 20.0];
-        if ui::hovered(cursor, sounds[0], sounds[1], sounds[2], sounds[3]) {
-            StudioSettingsAction::ToggleSounds
-        } else if ui::hovered(cursor, skins[0], skins[1], skins[2], skins[3]) {
-            StudioSettingsAction::ToggleSkins
-        } else if ui::hovered(cursor, names[0], names[1], names[2], names[3]) {
-            StudioSettingsAction::ToggleNames
-        } else if ui::hovered(cursor, mods[0], mods[1], mods[2], mods[3]) {
-            StudioSettingsAction::ToggleModsManifest
-        } else if ui::hovered(
-            cursor,
-            resource_pack[0],
-            resource_pack[1],
-            resource_pack[2],
-            resource_pack[3],
-        ) {
-            StudioSettingsAction::ToggleResourcePack
-        } else if ui::hovered(cursor, done[0], done[1], done[2], done[3]) {
-            StudioSettingsAction::Back
-        } else {
-            StudioSettingsAction::None
+    pub fn click(
+        &self,
+        cursor: (f32, f32),
+        size: (f32, f32),
+        settings: &crate::studio_preferences::StudioPreferences,
+    ) -> StudioSettingsAction {
+        let (_, viewport, done) = Self::geometry(size);
+        if ui::hovered(cursor, done[0], done[1], done[2], done[3]) {
+            return StudioSettingsAction::Back;
         }
+        if !ui::hovered(cursor, viewport[0], viewport[1], viewport[2], viewport[3]) {
+            return StudioSettingsAction::None;
+        }
+        let max_scroll = (Self::content_height() - viewport[3]).max(0.0);
+        let mut y = viewport[1] - self.scroll.min(max_scroll);
+        let mut section = None;
+        for (new_section, _label, _description, action, _enabled) in Self::rows(settings) {
+            if let Some(key) = new_section
+                && section != Some(key)
+            {
+                section = Some(key);
+                y += Self::SECTION_H;
+            }
+            let rect = [viewport[0], y, viewport[2], Self::ROW_H - 4.0];
+            if rect[1] >= viewport[1]
+                && rect[1] + rect[3] <= viewport[1] + viewport[3]
+                && ui::hovered(cursor, rect[0], rect[1], rect[2], rect[3])
+            {
+                return action;
+            }
+            y += Self::ROW_H;
+        }
+        StudioSettingsAction::None
+    }
+
+    pub fn wheel(&mut self, amount: f32, size: (f32, f32), cursor: (f32, f32)) -> bool {
+        let (_, viewport, _) = Self::geometry(size);
+        if !ui::hovered(cursor, viewport[0], viewport[1], viewport[2], viewport[3]) {
+            return false;
+        }
+        let max_scroll = (Self::content_height() - viewport[3]).max(0.0);
+        self.scroll = (self.scroll - amount * Self::ROW_H).clamp(0.0, max_scroll);
+        true
     }
 }
 
@@ -710,19 +818,33 @@ mod tests {
 
     #[test]
     fn studio_settings_rows_and_done_button_have_distinct_click_targets() {
-        let ui = StudioSettingsUi;
+        let ui = StudioSettingsUi::default();
         let size = (800.0, 600.0);
+        let settings = crate::studio_preferences::StudioPreferences::default();
         for (cursor, expected) in [
-            ((300.0, 80.0), StudioSettingsAction::ToggleSounds),
-            ((300.0, 112.0), StudioSettingsAction::ToggleSkins),
-            ((300.0, 144.0), StudioSettingsAction::ToggleNames),
-            ((300.0, 176.0), StudioSettingsAction::ToggleModsManifest),
-            ((300.0, 208.0), StudioSettingsAction::ToggleResourcePack),
+            ((300.0, 130.0), StudioSettingsAction::ToggleSkins),
+            ((300.0, 184.0), StudioSettingsAction::ToggleNames),
+            ((300.0, 256.0), StudioSettingsAction::ToggleSounds),
+            ((300.0, 332.0), StudioSettingsAction::ToggleModsManifest),
+            ((300.0, 386.0), StudioSettingsAction::ToggleResourcePack),
             ((620.0, 580.0), StudioSettingsAction::Back),
             ((40.0, 40.0), StudioSettingsAction::None),
         ] {
-            assert_eq!(ui.click(cursor, size), expected);
+            assert_eq!(ui.click(cursor, size, &settings), expected);
         }
+    }
+
+    #[test]
+    fn studio_settings_scroll_reaches_rows_that_do_not_fit_small_windows() {
+        let mut ui = StudioSettingsUi::default();
+        let size = (400.0, 300.0);
+        let settings = crate::studio_preferences::StudioPreferences::default();
+        let (_, viewport, _) = StudioSettingsUi::geometry(size);
+        assert!(ui.wheel(-3.0, size, (viewport[0] + 2.0, viewport[1] + 2.0)));
+        assert_eq!(
+            ui.click((viewport[0] + 2.0, viewport[1] + 84.0), size, &settings),
+            StudioSettingsAction::ToggleModsManifest
+        );
     }
 
     #[test]

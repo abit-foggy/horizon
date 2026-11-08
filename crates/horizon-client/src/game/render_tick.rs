@@ -132,7 +132,8 @@ impl Game<'_> {
             forward: forward.map(|c| c as f32),
             rain,
             thunder,
-            skybox: self.dim == Dim::Overworld,
+            skybox: self.dim == Dim::Overworld
+                && (self.studio_replay.is_none() || self.studio_visuals.settings.world_sky),
             blindness: self
                 .potions
                 .effects
@@ -152,6 +153,13 @@ impl Game<'_> {
         let mut fog = horizon_client::fog::setup_fog(tables, &self.fog, &input);
         if !self.settings.horizon.fog {
             horizon_client::fog::clear_distance_fog(&mut fog, &input);
+        }
+        if self.studio_replay.is_some() && self.studio_visuals.settings.override_fog {
+            let distance = self.studio_visuals.settings.fog_distance * 16.0;
+            fog.render_distance_start = (distance * 0.75).max(0.0);
+            fog.render_distance_end = distance;
+            fog.environmental_start = (distance * 0.75).max(0.0);
+            fog.environmental_end = distance;
         }
         if self.title.is_none() {
             fog.color =
