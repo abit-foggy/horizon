@@ -11951,10 +11951,9 @@ impl Game<'_> {
                     let pressed = state == ElementState::Pressed;
                     if self.screen == Screen::Playing
                         && (self.studio_replay.is_some() || self.studio_freecam.active)
+                        && self.handle_studio_mouse_click(pressed, button)?
                     {
-                        if self.handle_studio_mouse_click(pressed, button)? {
-                            return Ok(());
-                        }
+                        return Ok(());
                     }
                     if self.screen == Screen::Playing && self.studio_replay.is_some() {
                         return Ok(());
