@@ -6,6 +6,7 @@
 use super::{Game, PendingWorldEntry, Screen, packs};
 use horizon_client::{
     Result,
+    hud::HudBatch,
     studio::{Metadata, ReplayDriver},
     text::Text,
 };
@@ -15,6 +16,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use winit::event::{MouseButton, MouseScrollDelta};
 
 pub const HELP: &[&str] = &[
     "studio record start [NAME]     start recording clientbound packets into .mcpr archive",
@@ -74,6 +76,183 @@ impl Game<'_> {
             visuals: self.studio_visuals.settings.clone(),
         };
         preferences.save(&Self::studio_editor_preferences_path());
+    }
+
+    pub(super) fn draw_studio_hud(&mut self, batch: &mut HudBatch) {
+        self.studio_visuals
+            .set_active_scene(self.studio_timeline.selected_scene);
+        let timeline_bottom = if self.studio_timeline.visible {
+            self.studio_timeline.height()
+        } else {
+            0.0
+        };
+        batch.studio_editor_at = Some(batch.vertices.len() as u32);
+        self.studio_visuals
+            .render_guides(batch, &self.gui.atlas, timeline_bottom);
+        self.studio_timeline.render(
+            batch,
+            &self.gui.atlas,
+            self.cursor,
+            &self.studio_freecam,
+            self.studio_visuals.settings.editor_canvas_box,
+        );
+        self.studio_visuals
+            .render(batch, &self.gui.atlas, self.cursor, timeline_bottom);
+        self.studio_topbar.render(
+            batch,
+            &self.gui.atlas,
+            self.cursor,
+            self.studio_freecam.locked_to_path,
+            &self.settings.keys,
+        );
+    }
+
+    pub(super) fn handle_studio_mouse_wheel(&mut self, delta: MouseScrollDelta) {
+        let amount = match delta {
+            MouseScrollDelta::LineDelta(_, y) => y,
+            MouseScrollDelta::PixelDelta(p) => (p.y / 30.0) as f32,
+        };
+        if let Some(renderer) = &self.renderer {
+            let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+            let bottom = if self.studio_timeline.visible {
+                self.studio_timeline.height()
+            } else {
+                0.0
+            };
+            if self
+                .studio_visuals
+                .is_hovered(self.cursor, batch.width, batch.height, bottom)
+            {
+                self.studio_visuals
+                    .handle_scroll(amount, batch.height, bottom);
+            }
+        }
+    }
+
+    pub(super) fn handle_studio_mouse_click(
+        &mut self,
+        pressed: bool,
+        button: MouseButton,
+    ) -> Result<bool> {
+        if !pressed && button == MouseButton::Left {
+            if self.studio_visuals.resizing_width {
+                self.studio_visuals.resizing_width = false;
+                self.save_studio_editor_preferences();
+            }
+            let action = self.studio_timeline.handle_mouse_up();
+            if !matches!(action, horizon_client::studio::TimelineAction::None) {
+                self.handle_studio_timeline_action(action);
+            }
+        }
+        if button == MouseButton::Right {
+            if let Some(renderer) = &self.renderer {
+                let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+                let timeline_bottom = if self.studio_timeline.visible {
+                    self.studio_timeline.height()
+                } else {
+                    0.0
+                };
+                if self.studio_timeline.visible && self.cursor.1 >= batch.height - timeline_bottom {
+                    if pressed
+                        && let Some(index) = self.studio_timeline.keyframe_at_cursor(
+                            self.cursor,
+                            batch.width,
+                            batch.height,
+                            &self.studio_freecam,
+                        )
+                    {
+                        if index < self.studio_freecam.track.keyframes.len() {
+                            self.studio_freecam.track.keyframes.remove(index);
+                            self.studio_camera_track_dirty = true;
+                        }
+                        self.studio_timeline.selected_keyframe = None;
+                    }
+                    return Ok(true);
+                }
+                if pressed {
+                    if self.cursor.1 <= self.studio_topbar.height {
+                        return Ok(true);
+                    }
+                    if self.studio_visuals.open
+                        && self.cursor.0 >= batch.width - self.studio_visuals.width
+                    {
+                        return Ok(true);
+                    }
+                    if self.studio_visuals.settings.editor_canvas_box {
+                        let [cx, cy, cw, ch] = self.studio_visuals.comp_box_rect(
+                            batch.width,
+                            batch.height,
+                            timeline_bottom,
+                        );
+                        if self.cursor.0 < cx
+                            || self.cursor.0 > cx + cw
+                            || self.cursor.1 < cy
+                            || self.cursor.1 > cy + ch
+                        {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+            if pressed {
+                self.studio_topbar.close_dropdown();
+                self.studio_rmb_down = true;
+                self.capture(true);
+                return Ok(true);
+            } else if self.studio_rmb_down {
+                self.studio_rmb_down = false;
+                self.capture(false);
+                return Ok(true);
+            }
+        }
+        if pressed && button == MouseButton::Left {
+            let size = self
+                .renderer
+                .as_ref()
+                .map(|renderer| [renderer.config.width, renderer.config.height])
+                .unwrap_or([1, 1]);
+            let batch = HudBatch::new(size);
+            let had_open_menu = self.studio_topbar.open_menu.is_some();
+            let topbar_action =
+                self.studio_topbar
+                    .handle_mouse_click(self.cursor, batch.width, batch.height);
+            if !matches!(topbar_action, horizon_client::studio::TopBarAction::None) {
+                self.handle_studio_topbar_action(topbar_action);
+                return Ok(true);
+            }
+            if had_open_menu || self.cursor.1 <= self.studio_topbar.height {
+                return Ok(true);
+            }
+            if self.studio_visuals.handle_mouse_click(
+                self.cursor,
+                batch.width,
+                batch.height,
+                if self.studio_timeline.visible {
+                    self.studio_timeline.height()
+                } else {
+                    0.0
+                },
+            ) {
+                self.save_studio_editor_preferences();
+                return Ok(true);
+            }
+            if self.studio_timeline.visible {
+                let action = self.studio_timeline.handle_mouse_down(
+                    self.cursor,
+                    batch.width,
+                    batch.height,
+                    &self.studio_freecam,
+                );
+                if !matches!(action, horizon_client::studio::TimelineAction::None) {
+                    self.handle_studio_timeline_action(action);
+                    return Ok(true);
+                }
+                if self.cursor.1 >= batch.height - self.studio_timeline.height() {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// Resolve a Studio keybind from the physical key, without changing the

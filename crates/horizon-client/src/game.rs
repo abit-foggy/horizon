@@ -6411,32 +6411,7 @@ impl Game<'_> {
             && self.screen == Screen::Playing
             && (self.studio_replay.is_some() || self.studio_freecam.active)
         {
-            self.studio_visuals
-                .set_active_scene(self.studio_timeline.selected_scene);
-            let timeline_bottom = if self.studio_timeline.visible {
-                self.studio_timeline.height()
-            } else {
-                0.0
-            };
-            batch.studio_editor_at = Some(batch.vertices.len() as u32);
-            self.studio_visuals
-                .render_guides(&mut batch, &self.gui.atlas, timeline_bottom);
-            self.studio_timeline.render(
-                &mut batch,
-                &self.gui.atlas,
-                self.cursor,
-                &self.studio_freecam,
-                self.studio_visuals.settings.editor_canvas_box,
-            );
-            self.studio_visuals
-                .render(&mut batch, &self.gui.atlas, self.cursor, timeline_bottom);
-            self.studio_topbar.render(
-                &mut batch,
-                &self.gui.atlas,
-                self.cursor,
-                self.studio_freecam.locked_to_path,
-                &self.settings.keys,
-            );
+            self.draw_studio_hud(&mut batch);
         }
         batch
     }
@@ -8651,7 +8626,7 @@ impl Game<'_> {
                     let above = self.world.block(b[0], b[1] + 1, b[2]);
                     let same_above = self.res.facts().get(above).fluid == f.fluid;
                     if let Some((face, point)) =
-                        clip_start_source(origin, dir, self.reach(), b, same_above)
+                        clip_ray::clip_start_source(origin, dir, self.reach(), b, same_above)
                     {
                         return Some(Hit {
                             pos: b,
@@ -8664,7 +8639,9 @@ impl Game<'_> {
                     // outline, not its cell; it passes through the empty part
                     // of a torch, a fence or a flower to the water behind.
                     if let Some(hit) =
-                        outline_stop(origin, dir, self.reach(), b, face, || self.outline_boxes(b))
+                        clip_ray::outline_stop(origin, dir, self.reach(), b, face, || {
+                            self.outline_boxes(b)
+                        })
                     {
                         return Some(hit);
                     }
@@ -11694,27 +11671,7 @@ impl Game<'_> {
                     if self.screen == Screen::Playing
                         && (self.studio_replay.is_some() || self.studio_freecam.active) =>
                 {
-                    let amount = match delta {
-                        MouseScrollDelta::LineDelta(_, y) => y,
-                        MouseScrollDelta::PixelDelta(p) => (p.y / 30.0) as f32,
-                    };
-                    if let Some(renderer) = &self.renderer {
-                        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
-                        let bottom = if self.studio_timeline.visible {
-                            self.studio_timeline.height()
-                        } else {
-                            0.0
-                        };
-                        if self.studio_visuals.is_hovered(
-                            self.cursor,
-                            batch.width,
-                            batch.height,
-                            bottom,
-                        ) {
-                            self.studio_visuals
-                                .handle_scroll(amount, batch.height, bottom);
-                        }
-                    }
+                    self.handle_studio_mouse_wheel(delta);
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
                     let (raw_x, raw_y) = match delta {
@@ -11992,133 +11949,11 @@ impl Game<'_> {
                 }
                 WindowEvent::MouseInput { state, button, .. } => {
                     let pressed = state == ElementState::Pressed;
-                    if !pressed && button == MouseButton::Left {
-                        if self.studio_visuals.resizing_width {
-                            self.studio_visuals.resizing_width = false;
-                            self.save_studio_editor_preferences();
-                        }
-                        let action = self.studio_timeline.handle_mouse_up();
-                        if !matches!(action, horizon_client::studio::TimelineAction::None) {
-                            self.handle_studio_timeline_action(action);
-                        }
-                    }
-                    if (self.studio_freecam.active || self.studio_replay.is_some())
-                        && button == MouseButton::Right
-                    {
-                        if let Some(renderer) = &self.renderer {
-                            let batch =
-                                HudBatch::new([renderer.config.width, renderer.config.height]);
-                            let timeline_bottom = if self.studio_timeline.visible {
-                                self.studio_timeline.height()
-                            } else {
-                                0.0
-                            };
-                            if self.studio_timeline.visible
-                                && self.cursor.1 >= batch.height - timeline_bottom
-                            {
-                                if pressed
-                                    && let Some(index) = self.studio_timeline.keyframe_at_cursor(
-                                        self.cursor,
-                                        batch.width,
-                                        batch.height,
-                                        &self.studio_freecam,
-                                    )
-                                {
-                                    if index < self.studio_freecam.track.keyframes.len() {
-                                        self.studio_freecam.track.keyframes.remove(index);
-                                        self.studio_camera_track_dirty = true;
-                                    }
-                                    self.studio_timeline.selected_keyframe = None;
-                                }
-                                return Ok(());
-                            }
-                            if pressed {
-                                if self.cursor.1 <= self.studio_topbar.height {
-                                    return Ok(());
-                                }
-                                if self.studio_visuals.open
-                                    && self.cursor.0 >= batch.width - self.studio_visuals.width
-                                {
-                                    return Ok(());
-                                }
-                                if self.studio_visuals.settings.editor_canvas_box {
-                                    let [cx, cy, cw, ch] = self.studio_visuals.comp_box_rect(
-                                        batch.width,
-                                        batch.height,
-                                        timeline_bottom,
-                                    );
-                                    if self.cursor.0 < cx
-                                        || self.cursor.0 > cx + cw
-                                        || self.cursor.1 < cy
-                                        || self.cursor.1 > cy + ch
-                                    {
-                                        return Ok(());
-                                    }
-                                }
-                            }
-                        }
-                        if pressed {
-                            self.studio_topbar.close_dropdown();
-                            self.studio_rmb_down = true;
-                            self.capture(true);
-                            return Ok(());
-                        } else if self.studio_rmb_down {
-                            self.studio_rmb_down = false;
-                            self.capture(false);
-                            return Ok(());
-                        }
-                    }
-                    if pressed
-                        && button == MouseButton::Left
-                        && self.screen == Screen::Playing
+                    if self.screen == Screen::Playing
                         && (self.studio_replay.is_some() || self.studio_freecam.active)
                     {
-                        let size = self
-                            .renderer
-                            .as_ref()
-                            .map(|renderer| [renderer.config.width, renderer.config.height])
-                            .unwrap_or([1, 1]);
-                        let batch = HudBatch::new(size);
-                        let had_open_menu = self.studio_topbar.open_menu.is_some();
-                        let topbar_action = self.studio_topbar.handle_mouse_click(
-                            self.cursor,
-                            batch.width,
-                            batch.height,
-                        );
-                        if !matches!(topbar_action, horizon_client::studio::TopBarAction::None) {
-                            self.handle_studio_topbar_action(topbar_action);
+                        if self.handle_studio_mouse_click(pressed, button)? {
                             return Ok(());
-                        }
-                        if had_open_menu || self.cursor.1 <= self.studio_topbar.height {
-                            return Ok(());
-                        }
-                        if self.studio_visuals.handle_mouse_click(
-                            self.cursor,
-                            batch.width,
-                            batch.height,
-                            if self.studio_timeline.visible {
-                                self.studio_timeline.height()
-                            } else {
-                                0.0
-                            },
-                        ) {
-                            self.save_studio_editor_preferences();
-                            return Ok(());
-                        }
-                        if self.studio_timeline.visible {
-                            let action = self.studio_timeline.handle_mouse_down(
-                                self.cursor,
-                                batch.width,
-                                batch.height,
-                                &self.studio_freecam,
-                            );
-                            if !matches!(action, horizon_client::studio::TimelineAction::None) {
-                                self.handle_studio_timeline_action(action);
-                                return Ok(());
-                            }
-                            if self.cursor.1 >= batch.height - self.studio_timeline.height() {
-                                return Ok(());
-                            }
                         }
                     }
                     if self.screen == Screen::Playing && self.studio_replay.is_some() {
@@ -14048,81 +13883,6 @@ fn tick_sleep_timer(timer: u32, sleeping: bool) -> u32 {
     } else {
         0
     }
-}
-
-/// Where a ray entering `pos` first meets the block's outline boxes, if it
-/// does: a hollow block (torch, fence, flower) lets the ray through.
-fn outline_stop(
-    origin: [f64; 3],
-    dir: [f64; 3],
-    reach: f64,
-    pos: [i32; 3],
-    face: [i32; 3],
-    boxes: impl FnOnce() -> Vec<[f64; 6]>,
-) -> Option<Hit> {
-    let (t, face) = interaction_shapes::entry(origin, dir, &boxes(), reach, face)?;
-    Some(Hit {
-        pos,
-        face,
-        point: std::array::from_fn(|i| origin[i] + dir[i] * t),
-    })
-}
-/// `VoxelShape.clip` of a fluid source's shape for a ray that starts in the
-/// source's own block `cell`: the face and point it hits, in `pick_fluid`'s
-/// `Hit` terms. `FlowingFluid.getShape` is the whole block under the same
-/// fluid and `getOwnHeight` (8/9) tall otherwise. A start inside the shape
-/// (tested 1e-7 of the way along) hits at the start, on the face opposite
-/// `Direction.getApproximateNearest(dir)`; from above it, a ray going down
-/// enters through the top while still in this block.
-fn clip_start_source(
-    eye: [f64; 3],
-    dir: [f64; 3],
-    reach: f64,
-    cell: [i32; 3],
-    same_above: bool,
-) -> Option<([i32; 3], [f64; 3])> {
-    let height = if same_above {
-        1.0
-    } else {
-        f64::from(8.0f32 / 9.0f32)
-    };
-    let probe_y = eye[1] + dir[1] * reach * 1.0e-7;
-    if probe_y - f64::from(cell[1]) < height {
-        // Direction.values() order; the first of equal dot products wins.
-        let normals: [[i32; 3]; 6] = [
-            [0, -1, 0],
-            [0, 1, 0],
-            [0, 0, -1],
-            [0, 0, 1],
-            [-1, 0, 0],
-            [1, 0, 0],
-        ];
-        let mut nearest = normals[2];
-        let mut best = f64::NEG_INFINITY;
-        for n in normals {
-            let dot =
-                f64::from(n[0]) * dir[0] + f64::from(n[1]) * dir[1] + f64::from(n[2]) * dir[2];
-            if dot > best {
-                best = dot;
-                nearest = n;
-            }
-        }
-        return Some((nearest.map(|v| -v), eye));
-    }
-    if dir[1] >= 0.0 {
-        return None;
-    }
-    let t = (f64::from(cell[1]) + height - eye[1]) / dir[1];
-    if t > reach {
-        return None;
-    }
-    let point = [
-        eye[0] + dir[0] * t,
-        eye[1] + dir[1] * t,
-        eye[2] + dir[2] * t,
-    ];
-    (point[0].floor() as i32 == cell[0] && point[2].floor() as i32 == cell[2])
-        .then_some(([0, 1, 0], point))
 }
 
 fn reset_world_progress(adv: &mut advancements::AdvState, stats: &mut stats::Stats) {

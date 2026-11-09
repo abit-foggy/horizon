@@ -1,4 +1,5 @@
 //! Unit tests that lived in game.rs's inline `tests` module.
+use super::clip_ray::{clip_start_source, outline_stop};
 use super::*;
 use horizon_client::container_screen::{Button, Clicks, Release, Target};
 use horizon_client::keymapping::{KeyAction, SNEAK, SPRINT, ToggleKeys};
