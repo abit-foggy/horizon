@@ -66,9 +66,11 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(FILE);
-        let mut settings = EditorPreferences::default();
-        settings.timeline_visible = false;
-        settings.visuals_open = true;
+        let mut settings = EditorPreferences {
+            timeline_visible: false,
+            visuals_open: true,
+            ..Default::default()
+        };
         settings.visuals.editor_canvas_box = true;
         settings.visuals.override_time = true;
         settings.visuals.time_of_day = 18000.0;

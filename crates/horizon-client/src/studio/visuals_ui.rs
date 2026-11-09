@@ -1963,8 +1963,10 @@ mod tests {
 
     #[test]
     fn cycle_roll_skips_redundant_negative_180() {
-        let mut settings = VisualsSettings::default();
-        settings.camera_roll = 0.0;
+        let mut settings = VisualsSettings {
+            camera_roll: 0.0,
+            ..Default::default()
+        };
         settings.cycle_roll();
         assert_eq!(settings.camera_roll, 90.0);
         settings.cycle_roll();
