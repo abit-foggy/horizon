@@ -215,10 +215,8 @@ impl Game<'_> {
             )),
         };
         let tilt = self.settings.file.double("damageTiltStrength");
-        let matrix =
-            glam::Mat4::from_cols_array(&bob_matrix(&state, tilt, self.settings.view_bobbing).m)
-                * self.native_shake_matrix(partial);
-        matrix
+        glam::Mat4::from_cols_array(&bob_matrix(&state, tilt, self.settings.view_bobbing).m)
+            * self.native_shake_matrix(partial)
     }
 
     /// Camera effects selected in Studio, applied even when freecam suppresses

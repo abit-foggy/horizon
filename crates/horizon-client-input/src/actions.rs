@@ -96,6 +96,17 @@ actions! {
     DebugLightmapTexture, "key.debug.lightmapTexture", None;
     DebugImprovedTransparency, "key.debug.improvedTransparency", None;
     Emote, "key.emote", Some(KeyCode::KeyB);
+    StudioExit, "key.studio.exit", Some(KeyCode::Escape);
+    StudioPauseMenu, "key.studio.pauseMenu", Some(KeyCode::KeyP);
+    StudioToggleFreecam, "key.studio.toggleFreecam", Some(KeyCode::KeyF);
+    StudioResetCamera, "key.studio.resetCamera", Some(KeyCode::Home);
+    StudioTogglePathLock, "key.studio.togglePathLock", Some(KeyCode::KeyL);
+    StudioAddKeyframe, "key.studio.addKeyframe", Some(KeyCode::KeyK);
+    StudioRemoveKeyframe, "key.studio.removeKeyframe", Some(KeyCode::Delete);
+    StudioSplitScene, "key.studio.splitScene", Some(KeyCode::KeyX);
+    StudioToggleVisuals, "key.studio.toggleVisuals", Some(KeyCode::KeyV);
+    StudioToggleTimeline, "key.studio.toggleTimeline", Some(KeyCode::KeyT);
+    StudioAddMarker, "key.studio.addMarker", Some(KeyCode::KeyM);
     HotbarPrevious, "pad.hotbarPrevious", None;
     HotbarNext, "pad.hotbarNext", None;
 }

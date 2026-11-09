@@ -41,11 +41,11 @@ impl EditorPreferences {
             return;
         };
         let tmp = path.with_extension("json.tmp");
-        if fs::write(&tmp, bytes).is_ok() {
-            if let Err(error) = fs::rename(&tmp, path) {
-                log::warn!("Studio: could not save editor preferences: {error}");
-                let _ = fs::remove_file(tmp);
-            }
+        if fs::write(&tmp, bytes).is_ok()
+            && let Err(error) = fs::rename(&tmp, path)
+        {
+            log::warn!("Studio: could not save editor preferences: {error}");
+            let _ = fs::remove_file(tmp);
         }
     }
 }
