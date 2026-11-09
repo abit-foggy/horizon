@@ -397,6 +397,8 @@ fn main() {
 
 fn fixture_frame(hud: &HudBatch) -> Frame<'_> {
     Frame {
+        comp_box: None,
+        terrain_visible: true,
         weather: &[],
         weather_time: client::weather::Time::new(0, 0.0),
         camera: glam::DVec3::new(8.0, 104.0, 0.5),

@@ -8850,9 +8850,9 @@ impl Renderer {
         let camera_section = camera_section(camera, self.layout.min_y());
         // The water mirror draws the same lists: they take in what its camera sees too
         // (above the screen's top, the far shore, the trees against the sky).
-        let mirror_plane = frame
-            .water_plane
-            .filter(|_| !frame.title && frame.terrain_visible && !warp_on && self.wants_water_plane());
+        let mirror_plane = frame.water_plane.filter(|_| {
+            !frame.title && frame.terrain_visible && !warp_on && self.wants_water_plane()
+        });
         let mirror = mirror_plane.map(|plane| Frustum {
             planes: frustum(mirror_view_projection(
                 cull_proj,

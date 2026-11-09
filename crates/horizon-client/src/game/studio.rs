@@ -102,6 +102,8 @@ impl Game<'_> {
             .mappings_for(&name)
             .find(|mapping| mapping.starts_with("key.studio."))?;
         horizon_client::keybinds::key_code(horizon_client::keybinds::KeyBinds::default_of(mapping))
+    }
+
     /// Opens the Studio script screen (`Screen::Studio`) over the world.
     ///
     /// Horizon Studio script windows (`ui.open`) use this slot instead of the

@@ -4480,14 +4480,6 @@ impl OptionsUi {
             self.studio_settings.wheel(amount, size, cursor);
             return Vec::new();
         }
-        if Self::controller_page(self.page()).is_some() {
-            let actions = self.controller.wheel(s, size, cursor, framebuffer, amount);
-            return self.controller_events(s, actions);
-        }
-        if Self::shader_page(self.page()).is_some() {
-            self.shader.scroll(s, size, amount);
-            return Vec::new();
-        }
         if self.page() == Page::PackOptions {
             self.pack_options.scroll(size, amount);
             return Vec::new();
