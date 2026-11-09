@@ -694,12 +694,12 @@ pub(super) struct Remote {
     /// `ClientSuggestionProvider.customCompletionSuggestions`: the extra chat
     /// completions this server sent (ClientboundCustomChatCompletionsPacket).
     custom_completions: std::collections::BTreeSet<String>,
-    players: HashMap<u128, String>,
+    pub(super) players: HashMap<u128, String>,
     /// `ClientPacketListener.playerInfoMap` as player-list entries, and
     /// which of them are listed.
     tab_players: HashMap<u128, horizon_client::tab_list::TabPlayer>,
     /// Each listed profile's unpacked `textures` property.
-    skin_textures: HashMap<u128, horizon_client::skins::Textures>,
+    pub(super) skin_textures: HashMap<u128, horizon_client::skins::Textures>,
     /// Active skin and cape from the services profile when the server sent none.
     own_profile: OwnProfile,
     /// The skin texture each profile's players show, once its download is ready.
@@ -710,7 +710,7 @@ pub(super) struct Remote {
     /// `ClientboundLoginPacket.onlineMode`: the player list shows heads.
     pub(super) online_mode: bool,
     /// Player entities in the level: entity id to profile UUID.
-    level_players: HashMap<i32, u128>,
+    pub(super) level_players: HashMap<i32, u128>,
     /// The profile name each player entity was created with (`RemotePlayer.getGameProfile`): it outlives the
     /// player-list entry, which servers remove to hide their NPCs from the list.
     level_player_names: HashMap<i32, String>,
@@ -5996,55 +5996,28 @@ impl Game<'_> {
         if !resolved.iter().any(|(u, _)| *u == local)
             && let Some((rgba, is_slim)) = horizon_client::skins::offline_skin()
         {
-            const OFFLINE: &str = "horizon/offline_skin";
-            if !self.skin_slots.contains(OFFLINE) || !self.gui.atlas.sprites.contains_key(OFFLINE) {
-                self.store_skin(OFFLINE.into(), rgba.clone());
+            if !self.skin_slots.contains("horizon/offline_skin")
+                || !self.gui.atlas.sprites.contains_key("horizon/offline_skin")
+            {
+                self.store_skin("horizon/offline_skin".into(), rgba.clone());
             }
             if *is_slim {
                 slim.insert(local);
             }
-            resolved.push((local, OFFLINE.into()));
+            resolved.push((local, "horizon/offline_skin".into()));
         }
         // An offline name's cape from the launcher, where the profile has none.
         if !capes.contains_key(&local)
             && let Some(rgba) = horizon_client::skins::offline_cape()
         {
-            const OFFLINE: &str = "capes/offline";
-            if !self.skin_slots.contains(OFFLINE) || !self.gui.atlas.sprites.contains_key(OFFLINE) {
-                self.store_skin(OFFLINE.into(), rgba.to_vec());
+            if !self.skin_slots.contains("capes/offline")
+                || !self.gui.atlas.sprites.contains_key("capes/offline")
+            {
+                self.store_skin("capes/offline".into(), rgba.to_vec());
             }
-            capes.insert(local, OFFLINE.into());
+            capes.insert(local, "capes/offline".into());
         }
-        if let Some(remote) = self.remote.as_ref()
-            && remote.session.is_recording()
-            && remote.session.captures_appearances()
-        {
-            let players: Vec<_> = remote
-                .level_players
-                .values()
-                .copied()
-                .collect::<std::collections::HashSet<_>>()
-                .into_iter()
-                .map(|uuid| (uuid, remote.players.get(&uuid).cloned()))
-                .collect();
-            let downloads = self.skin_downloads.borrow();
-            for (uuid, name) in players {
-                let skin_rgba = resolved
-                    .iter()
-                    .find(|(player, _)| *player == uuid)
-                    .and_then(|(_, location)| downloads.image(location));
-                let cape_rgba = capes
-                    .get(&uuid)
-                    .and_then(|location| downloads.image(location));
-                remote.session.record_appearance(
-                    uuid,
-                    name.as_deref(),
-                    slim.contains(&uuid),
-                    skin_rgba,
-                    cape_rgba,
-                );
-            }
-        }
+        self.record_studio_appearances(&resolved, &capes, &slim);
         // PlayerInfo.getSkin: the downloaded skin and its model, else the
         // profile's default skin (DefaultPlayerSkin.get), slim or wide.
         let skin_of = |skins: &HashMap<u128, String>, uuid: u128| match skins.get(&uuid) {
@@ -6185,52 +6158,6 @@ impl Game<'_> {
     }
     /// Puts a downloaded skin in an atlas skin slot (`SkinSlots::place`),
     /// unless every slot holds a skin drawn in the last frame.
-    /// Restore opted-in local Studio appearance data without a profile lookup.
-    pub(super) fn restore_studio_appearances(
-        &mut self,
-        appearances: &[crate::studio::StoredAppearance],
-    ) {
-        let mut restored = Vec::with_capacity(appearances.len());
-        {
-            let mut downloads = self.skin_downloads.borrow_mut();
-            for appearance in appearances {
-                let skin = appearance
-                    .skin_rgba
-                    .as_deref()
-                    .filter(|rgba| rgba.len() == 64 * 64 * 4)
-                    .map(|rgba| {
-                        downloads.remember_studio_texture(horizon_client::skins::Kind::Skin, rgba)
-                    });
-                let cape = appearance
-                    .cape_rgba
-                    .as_deref()
-                    .filter(|rgba| rgba.len() == 64 * 64 * 4)
-                    .map(|rgba| {
-                        downloads.remember_studio_texture(horizon_client::skins::Kind::Cape, rgba)
-                    });
-                restored.push((appearance, skin, cape));
-            }
-        }
-        let Some(remote) = self.remote.as_mut() else {
-            return;
-        };
-        for (appearance, skin, cape) in restored {
-            if let Some(name) = appearance.name.as_ref().filter(|name| name.len() <= 64) {
-                remote.players.insert(appearance.uuid, name.clone());
-            }
-            remote.skin_textures.insert(
-                appearance.uuid,
-                horizon_client::skins::Textures {
-                    skin,
-                    slim: appearance.slim,
-                    cape,
-                    elytra: None,
-                    signed: true,
-                },
-            );
-        }
-    }
-
     pub(super) fn store_skin(&mut self, location: String, rgba: Vec<u8>) {
         // 3D skin layers reads the pixels back when it builds the slabs.
         self.skin_downloads
@@ -13886,45 +13813,6 @@ mod tests {
         }
     }
 
-    /// `ClientPacketListener.handleGameEvent`: verify that the game event packet
-    /// types for arrow hit, pufferfish sting and limited crafting match vanilla.
-    #[test]
-    fn game_event_constants_and_types_match_vanilla() {
-        use horizon_protocol::packets::play::GameEvent;
-        // Event types from ClientboundGameEventPacket:
-        // 6 = PLAY_ARROW_HIT_SOUND, 7 = RAIN_LEVEL_CHANGE, 8 = THUNDER_LEVEL_CHANGE,
-        // 9 = PUFFER_FISH_STING, 11 = IMMEDIATE_RESPAWN, 12 = LIMITED_CRAFTING.
-        let arrow = GameEvent {
-            event: 6,
-            param: 0.0,
-        };
-        let rain = GameEvent {
-            event: 7,
-            param: 0.5,
-        };
-        let thunder = GameEvent {
-            event: 8,
-            param: 0.2,
-        };
-        let puffer = GameEvent {
-            event: 9,
-            param: 0.0,
-        };
-        let respawn = GameEvent {
-            event: 11,
-            param: 1.0,
-        };
-        let crafting = GameEvent {
-            event: 12,
-            param: 1.0,
-        };
-
-        assert_eq!(arrow.event, 6);
-        assert_eq!(rain.event, 7);
-        assert_eq!(thunder.event, 8);
-        assert_eq!(puffer.event, 9);
-        assert_eq!(respawn.event, 11);
-        assert_eq!(crafting.event, 12);
-        assert!(crafting.param == 1.0);
-    }
+    #[path = "remote_tests.rs"]
+    mod remote_tests;
 }

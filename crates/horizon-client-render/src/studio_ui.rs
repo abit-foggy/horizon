@@ -234,6 +234,52 @@ impl StudioUi {
         }
     }
 
+    pub(crate) fn geometry(
+        size: (f32, f32),
+    ) -> (
+        [f32; 4], // panel
+        [f32; 4], // open folder
+        [f32; 4], // refresh
+        [f32; 4], // edit replay
+        [f32; 4], // done
+        [f32; 4], // settings
+    ) {
+        let (w, h) = size;
+        let panel_w = (w - 40.0).clamp(280.0, 440.0).min((w - 16.0).max(1.0));
+        let panel_x = ((w - panel_w) / 2.0).floor();
+        let panel_y = 42.0_f32.min((h - 80.0).max(8.0));
+        let panel_h = (h - panel_y - 36.0).max(60.0);
+        let panel = [panel_x, panel_y, panel_w, panel_h];
+
+        let btn_y = h - 28.0;
+        let btn_h = 20.0;
+
+        // In narrow layouts, scale button widths proportionally so they never overlap.
+        let (f_w, r_w, e_w, d_w) = if panel_w >= 387.0 {
+            (130.0, 65.0, 110.0, 64.0)
+        } else {
+            let available = (panel_w - 18.0).max(0.0);
+            let scale = available / 369.0;
+            let f = (130.0 * scale).floor();
+            let r = (65.0 * scale).floor();
+            let e = (110.0 * scale).floor();
+            let d = (available - f - r - e).max(0.0);
+            (f, r, e, d)
+        };
+
+        let f_btn = [panel_x, btn_y, f_w, btn_h];
+        let r_btn = [panel_x + f_w + 6.0, btn_y, r_w, btn_h];
+        let e_btn = if panel_w >= 387.0 {
+            [panel_x + panel_w - 180.0, btn_y, e_w, btn_h]
+        } else {
+            [panel_x + f_w + 6.0 + r_w + 6.0, btn_y, e_w, btn_h]
+        };
+        let d_btn = [panel_x + panel_w - d_w, btn_y, d_w, btn_h];
+        let settings_btn = [w - 116.0, 4.0, 108.0, 22.0];
+
+        (panel, f_btn, r_btn, e_btn, d_btn, settings_btn)
+    }
+
     /// Draw the Studio Browser screen.
     pub fn draw(
         &mut self,
@@ -245,15 +291,14 @@ impl StudioUi {
         let (w, h) = (batch.width, batch.height);
         ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
 
-        // Leave the upper-right corner clear for Studio Settings, including at
-        // small GUI widths where a centered title would collide with it.
+        // Centered title
         ui::centered_text(
             batch,
             atlas,
             &Text::tr("horizon.pages.studio", &[]),
             0.0,
             12.0,
-            (w - 124.0).max(1.0),
+            w,
             style::WHITE,
         );
 
@@ -262,13 +307,11 @@ impl StudioUi {
         ui::centered_text(batch, atlas, &subtitle, 0.0, 26.0, w, style::GREY);
 
         // Main content area layout
-        let panel_w = (w - 40.0).clamp(280.0, 440.0);
-        let panel_x = ((w - panel_w) / 2.0).floor();
-        let panel_y = 42.0;
-        let panel_h = (h - 76.0).max(100.0);
+        let (panel, _, _, _, _, _) = Self::geometry((w, h));
+        let [panel_x, panel_y, panel_w, panel_h] = panel;
 
         // Glass panel backdrop for recordings list
-        style::panel(batch, atlas, [panel_x, panel_y, panel_w, panel_h]);
+        style::panel(batch, atlas, panel);
 
         if self.recordings.is_empty() {
             // Empty state
@@ -384,25 +427,21 @@ impl StudioUi {
         }
 
         // Bottom Button Bar
-        let btn_y = h - 28.0;
-        let btn_h = 20.0;
+        let (_, f_btn, r_btn, e_btn, d_btn, settings_btn) = Self::geometry((w, h));
 
         // Button 1: Open Folder (Left)
-        let f_btn = [panel_x, btn_y, 130.0, btn_h];
         let f_hover = ui::hovered(cursor, f_btn[0], f_btn[1], f_btn[2], f_btn[3]);
         let label = Text::tr("horizon.studio.open_folder", &[]);
         crate::widgets::record(&label.plain(), f_btn, true);
         style::button(batch, atlas, f_btn, &label, (f_hover, true, false));
 
         // Button 2: Refresh (Center-Left)
-        let r_btn = [panel_x + 136.0, btn_y, 65.0, btn_h];
         let r_hover = ui::hovered(cursor, r_btn[0], r_btn[1], r_btn[2], r_btn[3]);
         let label = Text::tr("horizon.studio.refresh", &[]);
         crate::widgets::record(&label.plain(), r_btn, true);
         style::button(batch, atlas, r_btn, &label, (r_hover, true, false));
 
         // Open the selected recording for playback.
-        let e_btn = [panel_x + panel_w - 180.0, btn_y, 110.0, btn_h];
         let e_hover = ui::hovered(cursor, e_btn[0], e_btn[1], e_btn[2], e_btn[3]);
         crate::widgets::record(
             &Text::tr("horizon.studio.open_replay", &[]).plain(),
@@ -418,7 +457,6 @@ impl StudioUi {
         );
 
         // Shared settings stay inside Studio rather than the Horizon settings hub.
-        let settings_btn = [w - 116.0, 4.0, 108.0, 22.0];
         let settings_hover = ui::hovered(
             cursor,
             settings_btn[0],
@@ -437,7 +475,6 @@ impl StudioUi {
         );
 
         // Button 3: Done / Back (Right)
-        let d_btn = [panel_x + panel_w - 64.0, btn_y, 64.0, btn_h];
         let d_hover = ui::hovered(cursor, d_btn[0], d_btn[1], d_btn[2], d_btn[3]);
         let label = Text::tr("gui.done", &[]);
         crate::widgets::record(&label.plain(), d_btn, true);
@@ -447,15 +484,9 @@ impl StudioUi {
 
     /// Process mouse click on the Studio Browser screen.
     pub fn click(&mut self, cursor: (f32, f32), size: (f32, f32)) -> StudioAction {
-        let (w, h) = size;
-        let panel_w = (w - 40.0).clamp(280.0, 440.0);
-        let panel_x = ((w - panel_w) / 2.0).floor();
-        let panel_y = 42.0;
-        let panel_h = (h - 76.0).max(100.0);
-        let btn_y = h - 28.0;
-        let btn_h = 20.0;
+        let (panel, f_btn, r_btn, e_btn, d_btn, settings_btn) = Self::geometry(size);
+        let [panel_x, panel_y, panel_w, panel_h] = panel;
 
-        let settings_btn = [w - 116.0, 4.0, 108.0, 22.0];
         if ui::hovered(
             cursor,
             settings_btn[0],
@@ -467,20 +498,17 @@ impl StudioUi {
         }
 
         // Button 1: Open Folder
-        let f_btn = [panel_x, btn_y, 130.0, btn_h];
         if ui::hovered(cursor, f_btn[0], f_btn[1], f_btn[2], f_btn[3]) {
             return StudioAction::OpenFolder;
         }
 
         // Button 2: Refresh
-        let r_btn = [panel_x + 136.0, btn_y, 65.0, btn_h];
         if ui::hovered(cursor, r_btn[0], r_btn[1], r_btn[2], r_btn[3]) {
             self.refresh();
             return StudioAction::Refresh;
         }
 
         // Button 3: Edit Replay
-        let e_btn = [panel_x + panel_w - 180.0, btn_y, 110.0, btn_h];
         if ui::hovered(cursor, e_btn[0], e_btn[1], e_btn[2], e_btn[3]) {
             if let Some(idx) = self.selected
                 && let Some(item) = self.recordings.get(idx)
@@ -493,7 +521,6 @@ impl StudioUi {
         }
 
         // Button 4: Done
-        let d_btn = [panel_x + panel_w - 64.0, btn_y, 64.0, btn_h];
         if ui::hovered(cursor, d_btn[0], d_btn[1], d_btn[2], d_btn[3]) {
             return StudioAction::Back;
         }
@@ -912,5 +939,42 @@ mod tests {
         ui.scroll = 100.0;
         ui.wheel(1.0);
         assert_eq!(ui.scroll, 100.0 - ROW_STEP);
+    }
+
+    #[test]
+    fn studio_browser_geometry_never_overlaps() {
+        for (w, h) in [
+            (320.0, 240.0),
+            (341.0, 199.0),
+            (427.0, 720.0),
+            (854.0, 480.0),
+            (1920.0, 1080.0),
+        ] {
+            let (panel, f_btn, r_btn, e_btn, d_btn, _) = StudioUi::geometry((w, h));
+            assert!(
+                panel[1] + panel[3] <= f_btn[1],
+                "panel must not overlap bottom buttons at {w}x{h}"
+            );
+            assert!(
+                f_btn[0] + f_btn[2] <= r_btn[0],
+                "open folder must not overlap refresh at {w}x{h}"
+            );
+            assert!(
+                r_btn[0] + r_btn[2] <= e_btn[0],
+                "refresh must not overlap edit replay at {w}x{h}"
+            );
+            assert!(
+                e_btn[0] + e_btn[2] <= d_btn[0],
+                "edit replay must not overlap done at {w}x{h}"
+            );
+            assert!(
+                d_btn[0] + d_btn[2] <= w,
+                "done button must not extend past window width at {w}x{h}"
+            );
+            assert!(
+                f_btn[1] + f_btn[3] <= h,
+                "buttons must not extend past window height at {w}x{h}"
+            );
+        }
     }
 }

@@ -1373,4 +1373,88 @@ impl Game<'_> {
             "Studio Recorder: Dumped initial world snapshot ({count} chunks) at timestamp 0ms"
         );
     }
+
+    pub(super) fn record_studio_appearances(
+        &self,
+        resolved: &[(u128, String)],
+        capes: &std::collections::HashMap<u128, String>,
+        slim: &std::collections::HashSet<u128>,
+    ) {
+        if let Some(remote) = self.remote.as_ref()
+            && remote.session.is_recording()
+            && remote.session.captures_appearances()
+        {
+            let players: Vec<_> = remote
+                .level_players
+                .values()
+                .copied()
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .map(|uuid| (uuid, remote.players.get(&uuid).cloned()))
+                .collect();
+            let downloads = self.skin_downloads.borrow();
+            for (uuid, name) in players {
+                let skin_rgba = resolved
+                    .iter()
+                    .find(|(player, _)| *player == uuid)
+                    .and_then(|(_, location)| downloads.image(location));
+                let cape_rgba = capes
+                    .get(&uuid)
+                    .and_then(|location| downloads.image(location));
+                remote.session.record_appearance(
+                    uuid,
+                    name.as_deref(),
+                    slim.contains(&uuid),
+                    skin_rgba,
+                    cape_rgba,
+                );
+            }
+        }
+    }
+
+    /// Restore opted-in local Studio appearance data without a profile lookup.
+    pub(super) fn restore_studio_appearances(
+        &mut self,
+        appearances: &[crate::studio::StoredAppearance],
+    ) {
+        let mut restored = Vec::with_capacity(appearances.len());
+        {
+            let mut downloads = self.skin_downloads.borrow_mut();
+            for appearance in appearances {
+                let skin = appearance
+                    .skin_rgba
+                    .as_deref()
+                    .filter(|rgba| rgba.len() == 64 * 64 * 4)
+                    .map(|rgba| {
+                        downloads.remember_studio_texture(horizon_client::skins::Kind::Skin, rgba)
+                    });
+                let cape = appearance
+                    .cape_rgba
+                    .as_deref()
+                    .filter(|rgba| rgba.len() == 64 * 64 * 4)
+                    .map(|rgba| {
+                        downloads.remember_studio_texture(horizon_client::skins::Kind::Cape, rgba)
+                    });
+                restored.push((appearance, skin, cape));
+            }
+        }
+        let Some(remote) = self.remote.as_mut() else {
+            return;
+        };
+        for (appearance, skin, cape) in restored {
+            if let Some(name) = appearance.name.as_ref().filter(|name| name.len() <= 64) {
+                remote.players.insert(appearance.uuid, name.clone());
+            }
+            remote.skin_textures.insert(
+                appearance.uuid,
+                horizon_client::skins::Textures {
+                    skin,
+                    slim: appearance.slim,
+                    cape,
+                    elytra: None,
+                    signed: true,
+                },
+            );
+        }
+    }
 }
