@@ -405,6 +405,10 @@ pub struct Menu {
     /// A mount menu's entity type (`minecraft:horse`): what its saddle and
     /// body slots take.
     pub mount: Option<String>,
+    /// Containers a recipe placement may also take ingredients from, after
+    /// the player's inventory (`native_recipe_sources`): the caller fills
+    /// them before and reads them back after.
+    pub sources: Vec<Vec<Option<ItemStack>>>,
 }
 
 /// `AnvilMenu`'s state besides its slots and `cost`.
@@ -855,6 +859,7 @@ impl Menu {
             enchant_button: None,
             may_build: true,
             mount: None,
+            sources: Vec::new(),
         }
         .with_initial_data()
     }
@@ -1153,9 +1158,9 @@ impl Menu {
     /// `EnchantmentMenu.slotsChanged`: no costs or clues without an
     /// enchantable item; with one, a level fills them (`enchant_changed`).
     fn enchant_changed(&mut self, env: &Env) {
-        let enchantable = self.containers[MAIN][0].as_ref().is_some_and(|s| {
-            env.enchantments.enchantable(&s.item) > 0 && s.enchantments().is_empty()
-        });
+        let enchantable = self.containers[MAIN][0]
+            .as_ref()
+            .is_some_and(|s| env.enchantments.enchantable_of(s) > 0 && s.enchantments().is_empty());
         if enchantable {
             self.enchant_changed = true;
         } else {
@@ -1395,17 +1400,19 @@ impl Menu {
 
     fn max_stack(env: &Env, stack: &ItemStack) -> u32 {
         // `ItemStack.getMaxStackSize`: the stack's component, else the item's.
-        // A removed component falls back to the item (`!minecraft:max_stack_size`).
-        let patched = stack.data().and_then(|d| {
-            if d.other("!minecraft:max_stack_size").is_some() {
-                return None;
-            }
-            match d.other("minecraft:max_stack_size") {
-                Some(horizon_world::nbt::Tag::Int(n)) if (1..=99).contains(n) => Some(*n as u32),
-                _ => None,
-            }
-        });
-        patched.unwrap_or_else(|| env.items.get(&stack.item).map_or(64, |i| i.max_stack))
+        // A removed component is `getOrDefault(MAX_STACK_SIZE, 1)`: one, not
+        // the item's own size (`!minecraft:max_stack_size`).
+        let data = stack.data();
+        if data.is_some_and(|d| d.other("!minecraft:max_stack_size").is_some()) {
+            return 1;
+        }
+        if let Some(horizon_world::nbt::Tag::Int(n)) =
+            data.and_then(|d| d.other("minecraft:max_stack_size"))
+            && (1..=99).contains(n)
+        {
+            return *n as u32;
+        }
+        env.items.get(&stack.item).map_or(64, |i| i.max_stack)
     }
 
     fn damageable(env: &Env, stack: &ItemStack) -> bool {
@@ -3457,6 +3464,31 @@ pub(crate) mod tests {
         });
     }
 
+    /// A menu reads a stack's own `MAX_STACK_SIZE`: a removed component is
+    /// vanilla's default of one, so two cannot merge into one slot.
+    #[test]
+    fn a_removed_max_stack_size_leaves_one_per_slot() {
+        with_menu(Kind::Inventory, |env, menu| {
+            let removed = || {
+                Some(horizon_world::nbt::Tag::compound(Vec::<(
+                    &str,
+                    horizon_world::nbt::Tag,
+                )>::new()))
+            };
+            let mut stone = stack("stone", 1).unwrap();
+            stone
+                .data_mut()
+                .set_other("!minecraft:max_stack_size", removed());
+            menu.set_slot(env, 9, Some(stone.clone()));
+            menu.carried = Some(stone);
+            menu.click(env, 9, 0, Input::Pickup).unwrap();
+            // Vanilla leaves both stacks at one; the item's default of 64 no
+            // longer lets the click merge them.
+            assert_eq!(menu.slot(9).map(|s| s.count), Some(1));
+            assert_eq!(menu.carried.as_ref().map(|s| s.count), Some(1));
+        });
+    }
+
     /// A menu over the game's data (`.local/horizon-client`); skipped without it.
     pub(crate) fn with_menu(kind: Kind, test: impl FnOnce(&Env, &mut Menu)) {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -3876,6 +3908,8 @@ pub(crate) mod tests {
                     }
                 },
                 player_chat: |_, _, _, _, _| {},
+                player_chat_v2: |_, _, _, _, _, _| {},
+                chat_decorate: |_, _, _, _| {},
                 sound_play: |_, _, _, _| {},
                 living_heal: |_, _, _| {},
                 living_breathe: |_, _, _, _, _| {},
@@ -3896,6 +3930,7 @@ pub(crate) mod tests {
             slots: 1,
             data_slots: 0,
             results: vec![],
+            links: None,
             crafting: None,
         })));
         let menu = Menu::new(kind);
@@ -3977,6 +4012,7 @@ pub(crate) mod tests {
             slots: 4,
             data_slots: 0,
             results: vec![3],
+            links: None,
             crafting: None,
         })))
     }
@@ -4070,6 +4106,7 @@ pub(crate) mod tests {
             slots: 10,
             data_slots: 0,
             results: vec![],
+            links: None,
             crafting: Some(crate::containers::ModCrafting {
                 grid: 1,
                 size: 3,
@@ -4190,6 +4227,43 @@ pub(crate) mod tests {
             let (.., transfer, (slots, ..)) = &places[1];
             assert_eq!(*transfer, Ok(()));
             assert_eq!(slots[0], stack("stick", 4));
+        });
+    }
+
+    /// Extra sources (`native_recipe_sources`) count as more inventory: the
+    /// grid fills as the table's does when the player holds what the sources
+    /// hold, the inventory gives first, then the sources in order, and a
+    /// refused transfer leaves them as they were.
+    #[test]
+    fn recipe_placement_takes_from_the_sources_after_the_inventory() {
+        with_menu(Kind::Crafting, |env, table| {
+            let station = &mut Menu::new(mod_crafting_table());
+            table.set_player_item(0, stack("oak_planks", 10));
+            station.set_player_item(0, stack("oak_planks", 1));
+            station.sources = vec![
+                vec![None, stack("dirt", 5)],
+                vec![stack("oak_planks", 2), stack("oak_planks", 7)],
+            ];
+            for menu in [&mut *table, &mut *station] {
+                menu.place_recipe(env, "minecraft:crafting_table", false, false, None);
+            }
+            let grid = |m: &Menu| (0..10).map(|s| m.slot(s).cloned()).collect::<Vec<_>>();
+            assert_eq!(grid(station), grid(table));
+            assert_eq!(station.slot(0), stack("crafting_table", 1).as_ref());
+            // 1 from the inventory, then 2 and 1 from the second source.
+            assert_eq!(station.player_item(0), None);
+            assert_eq!(
+                station.sources,
+                vec![
+                    vec![None, stack("dirt", 5)],
+                    vec![None, stack("oak_planks", 6)]
+                ]
+            );
+            // A furnace needs 8 cobblestone, which no one has: nothing moves.
+            let before = station.sources.clone();
+            let refused = station.transfer_recipe(env, "minecraft:furnace");
+            assert_eq!(refused, Err(place::TransferError::Missing));
+            assert_eq!(station.sources, before);
         });
     }
 

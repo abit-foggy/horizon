@@ -311,7 +311,7 @@ impl Game<'_> {
                 != Some(Ticker::Bell)
             {
                 self.be_anims.bells.remove(&pos);
-            } else if self.tickets.levels().block_ticking_at(pos[0], pos[2]) {
+            } else if self.block_ticking_area()(pos[0], pos[2]) {
                 self.tick_bell(pos, &raiders);
             }
         }
@@ -531,7 +531,14 @@ impl Game<'_> {
         if self.world.game_time % 40 == 0 {
             self.find_conduits();
         }
-        let mut positions: Vec<[i32; 3]> = self.be_anims.conduit_servers.keys().copied().collect();
+        let ticking = self.block_ticking_area();
+        let mut positions: Vec<[i32; 3]> = self
+            .be_anims
+            .conduit_servers
+            .keys()
+            .copied()
+            .filter(|p| ticking(p[0], p[2]))
+            .collect();
         positions.sort_unstable();
         for pos in positions {
             self.tick_conduit_server(pos);
@@ -695,12 +702,26 @@ impl Game<'_> {
     /// `ConduitBlockEntity.updateAndAttackTarget`: while the conduit hunts
     /// (42 frame blocks) its target stays until it dies or leaves the 8
     /// blocks, else a random enemy in water or rain is chosen; the target
-    /// takes 4 magic damage.
+    /// takes 4 magic damage. The target is the block entity's (`Target`), so
+    /// a saved or `/data` one is kept or dropped as vanilla's reference is.
     fn conduit_attack(&mut self, conduit: &mut ConduitServer, pos: [i32; 3], hunting: bool) {
-        conduit.target = match conduit.target {
+        let key = (pos[0], pos[1], pos[2]);
+        let saved = match self.world.block_entities.get(&key) {
+            Some(BlockEntity::Conduit(target)) => Some(*target),
+            _ => None,
+        };
+        // EntityReference.getLivingEntity: a reference no loaded mob answers
+        // is no target, and no new one is chosen in its place this time.
+        let current = match saved {
+            Some(Some(uuid)) => Some(self.mob_by_uuid(uuid)),
+            Some(None) => None,
+            None => conduit.target.map(Some),
+        };
+        conduit.target = match current {
             _ if !hunting => None,
             None => self.conduit_new_target(pos),
-            Some(id) => self
+            Some(None) => None,
+            Some(Some(id)) => self
                 .mobs
                 .iter()
                 .find(|m| m.id == id && !m.removed)
@@ -716,6 +737,16 @@ impl Game<'_> {
                 })
                 .map(|m| m.id),
         };
+        if saved.is_some() {
+            let target = conduit.target.map(|id| self.mob_uuid(id));
+            if saved != Some(target)
+                && let Some(BlockEntity::Conduit(saved)) = self.world.block_entities.get_mut(&key)
+            {
+                // `sendBlockUpdated`: the new target reaches the clients.
+                *saved = target;
+                self.mark_block_entity_updated(key);
+            }
+        }
         let Some(m) = conduit
             .target
             .and_then(|id| self.mobs.iter_mut().find(|m| m.id == id))
@@ -775,13 +806,13 @@ impl Game<'_> {
     /// (`Level.tickBlockEntities`): the cooldown an entry started runs out,
     /// and every 2400 ticks `triggerCooldown` sends its block event.
     fn tick_gateway_servers(&mut self) {
-        let levels = self.tickets.levels();
+        let ticking = self.block_ticking_area();
         let mut positions: Vec<[i32; 3]> = self
             .be_anims
             .gateway_servers
             .keys()
             .copied()
-            .filter(|p| levels.block_ticking_at(p[0], p[2]))
+            .filter(|p| ticking(p[0], p[2]))
             .collect();
         positions.sort_unstable();
         for pos in positions {
@@ -906,7 +937,7 @@ impl Game<'_> {
                 return None;
             };
             let (value, signature) = profile.textures()?;
-            let url = skins::unpack(&value, signature, &skins::TEXTURE_URIS).skin?;
+            let url = skins::unpack(&value, signature, skins::texture_uris()).skin?;
             let location = skins::skin_location(&skins::texture_hash(&url)?);
             Some((url, location))
         });
